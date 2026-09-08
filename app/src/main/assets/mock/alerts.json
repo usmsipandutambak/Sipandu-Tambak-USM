@@ -1,0 +1,10 @@
+﻿[
+  {
+    "id": "alt-warn-01",
+    "device_id": "alt-b",
+    "pond_name": "Kolam Pembesaran 2",
+    "message": "Kadar Oksigen Terlarut (DO) di bawah ambang kritis!",
+    "severity": "BAHAYA",
+    "timestamp": "2026-09-08T15:40:00Z"
+  }
+]

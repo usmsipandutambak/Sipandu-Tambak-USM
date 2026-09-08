@@ -1,0 +1,18 @@
+﻿[
+  {
+    "id": "alt-a",
+    "name": "Stasiun Sensor A",
+    "pond_id": "p1",
+    "pond_name": "Kolam Pembesaran 1",
+    "status": "NORMAL",
+    "last_seen": "2026-09-08T15:30:00Z"
+  },
+  {
+    "id": "alt-b",
+    "name": "Stasiun Sensor B",
+    "pond_id": "p2",
+    "pond_name": "Kolam Pembesaran 2",
+    "status": "BAHAYA",
+    "last_seen": "2026-09-08T15:45:00Z"
+  }
+]
