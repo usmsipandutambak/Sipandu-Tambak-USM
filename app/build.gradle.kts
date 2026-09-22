@@ -70,8 +70,13 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.google.gson)
 
-    // Room Database & Background Tasks
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
+    // Background Tasks 
     implementation(libs.androidx.work.runtime.ktx)
+
+    // CameraX & ML Kit QR Code Scanner
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 }

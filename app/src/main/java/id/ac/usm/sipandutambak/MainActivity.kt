@@ -1,26 +1,48 @@
 package id.ac.usm.sipandutambak.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.core.content.ContextCompat
+import id.ac.usm.sipandutambak.di.ServiceLocator
+import id.ac.usm.sipandutambak.ui.dashboard.DashboardViewModel
+import id.ac.usm.sipandutambak.ui.navigation.AppNavigation
+import id.ac.usm.sipandutambak.ui.theme.SipanduTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val dashboardViewModel: DashboardViewModel by viewModels {
+        DashboardViewModel.Factory(ServiceLocator.repository)
+    }
+
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        askNotificationPermission()
+
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "SIPANDU-TAMBAK Siap Dijalankan!")
-                    }
-                }
+            SipanduTheme {
+                AppNavigation(dashboardViewModel = dashboardViewModel)
+            }
+        }
+    }
+    
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permissionCheck = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+            if (permissionCheck != PackageManager.PERMISSION_GRANTED) {
+                requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }

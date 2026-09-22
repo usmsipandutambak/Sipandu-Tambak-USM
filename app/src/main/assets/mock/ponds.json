@@ -1,0 +1,14 @@
+﻿[
+  {
+    "id": "p1",
+    "name": "Kolam Pembesaran 1",
+    "clarity": "JERNIH",
+    "device_count": 1
+  },
+  {
+    "id": "p2",
+    "name": "Kolam Pembesaran 2",
+    "clarity": "KERUH",
+    "device_count": 1
+  }
+]

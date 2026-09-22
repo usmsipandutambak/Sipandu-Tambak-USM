@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SipanduTambak" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#0A192F</item>
+        <item name="android:navigationBarColor">#0A192F</item>
+        <item name="android:windowBackground">#0A192F</item>
+        <item name="android:windowSplashScreenBackground">#0A192F</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_badge</item>
+    </style>
+
+    <!-- Alias cadangan jika AndroidManifest memakai huruf kapital -->
+    <style name="Theme.SIPANDUTAMBAK" parent="Theme.SipanduTambak" />
+</resources>

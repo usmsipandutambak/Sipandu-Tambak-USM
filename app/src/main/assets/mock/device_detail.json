@@ -1,0 +1,31 @@
+﻿{
+  "id": "alt-a",
+  "name": "Stasiun Sensor A",
+  "pond_id": "p1",
+  "pond_name": "Kolam Pembesaran 1",
+  "status": "NORMAL",
+  "last_seen": "2026-09-09T13:00:00Z",
+  "parameters": [
+    {
+      "id": "do",
+      "name": "Oksigen Terlarut (DO)",
+      "value": 6.2,
+      "unit": "mg/L",
+      "status": "NORMAL"
+    },
+    {
+      "id": "ph",
+      "name": "Derajat Keasaman (pH)",
+      "value": 7.6,
+      "unit": "pH",
+      "status": "NORMAL"
+    },
+    {
+      "id": "temp",
+      "name": "Suhu Air",
+      "value": 28.5,
+      "unit": "°C",
+      "status": "NORMAL"
+    }
+  ]
+}
