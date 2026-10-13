@@ -1,4 +1,4 @@
-﻿package id.ac.usm.sipandutambak.data.api
+package id.ac.usm.sipandutambak.data.api
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -154,6 +154,30 @@ object SupabaseApi {
         } catch (e: Exception) {
             e.printStackTrace()
             JSONArray()
+        }
+    }
+
+    suspend fun updateDeviceCalibration(deviceId: String, calibrationJson: JSONObject): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val endpoint = URL(BASE_URL + "/rest/v1/devices?id=eq." + deviceId)
+            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
+                requestMethod = "PATCH"
+                setRequestProperty("apikey", ANON_KEY)
+                setRequestProperty("Authorization", "Bearer " + ANON_KEY)
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Prefer", "return=minimal")
+                doOutput = true
+                connectTimeout = 8000
+                readTimeout = 8000
+            }
+            val payload = JSONObject().apply {
+                put("calibration_data", calibrationJson.toString())
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
+            conn.responseCode in 200..204
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
     }
 }

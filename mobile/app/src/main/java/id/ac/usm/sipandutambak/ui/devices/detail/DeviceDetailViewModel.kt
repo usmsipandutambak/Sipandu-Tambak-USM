@@ -1,4 +1,4 @@
-﻿package id.ac.usm.sipandutambak.ui.devices.detail
+package id.ac.usm.sipandutambak.ui.devices.detail
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -263,6 +264,32 @@ class DeviceDetailViewModel(
 
     fun updateDoConfig(slope: String, offset: String) {
         _uiState.update { it.copy(doConfig = SensorParamConfig(slope, offset)) }
+    }
+
+    fun saveCalibrationToDevice(onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val state = _uiState.value
+            fun parse(s: String): Double = s.replace(',', '.').toDoubleOrNull() ?: 0.0
+
+            val phSlope = parse(state.phConfig.slope)
+            val phOffset = parse(state.phConfig.offset)
+            val doSlope = parse(state.doConfig.slope)
+            val doOffset = parse(state.doConfig.offset)
+            val tdsSlope = parse(state.tdsConfig.slope)
+            val tdsOffset = parse(state.tdsConfig.offset)
+
+            val payload = org.json.JSONObject().apply {
+                put("command", "calibrate")
+                put("ph", org.json.JSONObject().put("slope", phSlope).put("offset", phOffset))
+                put("do", org.json.JSONObject().put("slope", doSlope).put("offset", doOffset))
+                put("tds", org.json.JSONObject().put("slope", tdsSlope).put("offset", tdsOffset))
+            }
+
+            val ok = if (deviceId.isNotBlank()) SupabaseApi.updateDeviceCalibration(deviceId, payload) else false
+            withContext(Dispatchers.Main) {
+                onComplete(ok)
+            }
+        }
     }
 
     override fun onCleared() {

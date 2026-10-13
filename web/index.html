@@ -94,6 +94,15 @@
           <button id="jetson-ip-save" class="btn btn-primary w-full" style="font-size:11px;padding:6px 10px">
             Terapkan IP Jetson
           </button>
+
+          <div class="form-group" style="margin-bottom:8px;margin-top:14px">
+            <label class="form-label" style="color:#475569">Broker MQTT (Paho Cloud)</label>
+            <input id="mqtt-host-input" class="form-input" type="text" placeholder="broker.hivemq.com"
+              style="background:#0F172A;border-color:#334155;color:#CBD5E1;font-size:12px;padding:6px 8px;font-family:'Courier New',monospace" />
+          </div>
+          <button id="mqtt-connect-btn" class="btn btn-primary w-full" style="font-size:11px;padding:6px 10px;background:#059669">
+            Hubungkan MQTT
+          </button>
         </div>
       </nav>
 
@@ -650,7 +659,9 @@
   <div id="toast-container"></div>
 
   <!-- Scripts (order matters) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
   <script src="assets/js/utils.js"></script>
+  <script src="assets/js/mqtt-client.js"></script>
   <script src="assets/js/esp32-api.js"></script>
   <script src="assets/js/jetson-api.js"></script>
   <script src="assets/js/realtime.js"></script>
@@ -665,6 +676,22 @@
   <script>
     // ── Extra UI wiring that needs DOM ─────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
+
+      // MQTT Client & UI init
+      const mqttHostEl = document.getElementById('mqtt-host-input');
+      const mqttBtnEl  = document.getElementById('mqtt-connect-btn');
+      if (mqttHostEl && window.MQTTConfig) mqttHostEl.value = MQTTConfig.host;
+      if (mqttBtnEl && window.MQTTClient) {
+        mqttBtnEl.addEventListener('click', () => {
+          if (mqttHostEl && mqttHostEl.value.trim()) {
+            MQTTConfig.host = mqttHostEl.value.trim();
+          }
+          MQTTClient.disconnect();
+          MQTTClient.connect();
+          Utils.toast('Menghubungkan ke broker MQTT: ' + MQTTConfig.host, 'info');
+        });
+        MQTTClient.init();
+      }
 
       // Camera clock
       function updateCamTime() {

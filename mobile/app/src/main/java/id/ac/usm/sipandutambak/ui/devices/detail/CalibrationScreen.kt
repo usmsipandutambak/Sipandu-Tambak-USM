@@ -203,8 +203,11 @@ fun CalibrationScreen(
                 Spacer(modifier = Modifier.height(4.dp))
                 Surface(
                     onClick = {
-                        Toast.makeText(context, "Kalibrasi berhasil disimpan! Status: " + state.status, Toast.LENGTH_SHORT).show()
-                        onBackClick()
+                        viewModel.saveCalibrationToDevice { success ->
+                            val msg = if (success) "Kalibrasi berhasil disimpan dan disinkronkan ke alat!" else "Kalibrasi berhasil disimpan ke profil perangkat"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            onBackClick()
+                        }
                     },
                     shape = RoundedCornerShape(12.dp),
                     color = Color(0xFFD6E7FC),

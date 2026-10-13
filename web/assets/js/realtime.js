@@ -63,6 +63,14 @@ const Realtime = (() => {
     isConnected() { return _isConnected; },
     lastDataMs()  { return _lastDataMs; },
 
+    _feedMqttData(data) {
+      if (!data) return;
+      _lastDataMs = Date.now();
+      _setConnected(true);
+      _emit('sensors', data);
+      _emit('status', data);
+    },
+
     on(event, fn) {
       if (_listeners[event]) _listeners[event].push(fn);
     },

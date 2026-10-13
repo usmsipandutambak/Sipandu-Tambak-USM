@@ -50,21 +50,37 @@ const ESP32API = (() => {
 
     /** POST /api/calibration — {ph:{slope,offset}, do:{slope,offset}, ...} */
     postCalibration(payload) {
+      if (window.MQTTClient && window.MQTTClient.isConnected()) {
+        const ok = window.MQTTClient.sendCommand({ command: 'calibrate', ...payload });
+        if (ok) return Promise.resolve({ ok: true, via: 'mqtt' });
+      }
       return _fetch('/api/calibration', { method: 'POST', body: JSON.stringify(payload) });
     },
 
     /** POST /api/calibration/reset — {sensor:"ph"|"do"|"tds"|"turbidity"|"all"} */
     resetCalibration(sensor) {
+      if (window.MQTTClient && window.MQTTClient.isConnected()) {
+        const ok = window.MQTTClient.sendCommand({ command: 'reset_calibration', sensor });
+        if (ok) return Promise.resolve({ ok: true, via: 'mqtt' });
+      }
       return _fetch('/api/calibration/reset', { method: 'POST', body: JSON.stringify({ sensor }) });
     },
 
     /** POST /api/control/sensors — {power: true/false} */
     controlSensors(power) {
+      if (window.MQTTClient && window.MQTTClient.isConnected()) {
+        const ok = window.MQTTClient.sendCommand({ command: 'power_sensors', power });
+        if (ok) return Promise.resolve({ ok: true, sensor_power: power, via: 'mqtt' });
+      }
       return _fetch('/api/control/sensors', { method: 'POST', body: JSON.stringify({ power }) });
     },
 
     /** POST /api/control/jetson — {power: true/false} */
     controlJetson(power) {
+      if (window.MQTTClient && window.MQTTClient.isConnected()) {
+        const ok = window.MQTTClient.sendCommand({ command: 'power_jetson', power });
+        if (ok) return Promise.resolve({ ok: true, jetson_power: power, via: 'mqtt' });
+      }
       return _fetch('/api/control/jetson', { method: 'POST', body: JSON.stringify({ power }) });
     },
   };
