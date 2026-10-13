@@ -19,6 +19,14 @@ void requestGracefulJetsonPowerOff() {
         Serial.println(F("[POWER] Jetson sudah dalam kondisi OFF."));
         return;
     }
+    if (jetsonShutdownPending) {
+        // Cegah race condition dari spamming perintah: pertahankan deadline timer pertama
+        unsigned long elapsed = millis() - jetsonShutdownStartMs;
+        long remaining = (long)(JETSON_SHUTDOWN_GRACE_PERIOD_MS - elapsed) / 1000;
+        if (remaining < 0) remaining = 0;
+        Serial.printf("[POWER] Graceful shutdown sedang aktif, sisa: %ld detik (Timer terkunci aman)\n", remaining);
+        return;
+    }
     Serial.println(F("[POWER] Menerima instruksi Matikan Jetson!"));
     Serial.println(F("[POWER] Memulai jeda graceful shutdown 30 detik agar OS aman..."));
     jetsonShutdownPending = true;

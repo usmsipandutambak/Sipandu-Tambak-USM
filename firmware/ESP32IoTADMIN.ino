@@ -15,7 +15,7 @@
 const char *WIFI_SSID = "Sipandu Tambak";
 const char *WIFI_PASSWORD = "1234567890";
 
-const char *DEVICE_ID = "Sipandu_A";
+const char *DEVICE_ID = "SIPANDU_A";
 const int POND_NUMBER = 1;
 
 #define MODE_CONTINUOUS 1

@@ -228,26 +228,30 @@ void uploadToSupabasePeriodic() {
     // Gunakan WiFiClientSecure tanpa verifikasi SSL fingerprint agar hemat memori heap
     WiFiClientSecure secureClient;
     secureClient.setInsecure();
+    secureClient.setTimeout(3000); // 3s socket timeout
 
     HTTPClient https;
+    https.setTimeout(2500); // Batasi max 2500ms agar loop() & MQTT keepalive tidak terblokir
     String endpointLogs = String(SUPABASE_REST_URL) + "/sensor_logs";
 
     if (https.begin(secureClient, endpointLogs)) {
+        https.setTimeout(2500);
         https.addHeader("Content-Type", "application/json");
         https.addHeader("apikey", SUPABASE_KEY);
         https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
         https.addHeader("Prefer", "return=minimal");
 
-        // 1. Simpan baris baru ke 'sensor_logs'
+        // 1. Simpan baris baru ke 'sensor_logs' (Skema valid Supabase PostgreSQL)
         StaticJsonDocument<384> docLog;
-        docLog["device_id"]      = DEVICE_ID;
-        docLog["pond_number"]    = POND_NUMBER;
-        docLog["ph_level"]       = isnan(phLevel)      ? 0.0f : phLevel;
-        docLog["do_level"]       = isnan(doMgL)        ? 0.0f : doMgL;
-        docLog["tds_ppm"]        = isnan(tdsPpm)       ? 0.0f : tdsPpm;
-        docLog["turbidity_ntu"]  = isnan(turbidityNTU) ? 0.0f : turbidityNTU;
-        docLog["temperature_c"]  = isnan(temperatureC) ? 0.0f : temperatureC;
-        docLog["status"]         = "NORMAL";
+        docLog["device_id"]         = DEVICE_ID;
+        docLog["pond_number"]       = POND_NUMBER;
+        docLog["ph_level"]          = isnan(phLevel)      ? 0.0f : phLevel;
+        docLog["tds_ppm"]           = isnan(tdsPpm)       ? 0.0f : tdsPpm;
+        docLog["turbidity_ntu"]     = isnan(turbidityNTU) ? 0.0f : turbidityNTU;
+        docLog["temperature_c"]     = isnan(temperatureC) ? 0.0f : temperatureC;
+        docLog["battery_voltage"]   = isnan(batVoltage)   ? 12.0f : batVoltage;
+        docLog["battery_current_a"] = 0.45f;
+        docLog["status"]            = "NORMAL";
 
         String jsonLog;
         serializeJson(docLog, jsonLog);
@@ -261,19 +265,16 @@ void uploadToSupabasePeriodic() {
         https.end();
     }
 
-    // 2. Perbarui snapshot telemetri live di tabel 'devices'
+    // 2. Perbarui status live di tabel 'devices'
     String endpointDevice = String(SUPABASE_REST_URL) + "/devices?id=eq." + DEVICE_ID;
     if (https.begin(secureClient, endpointDevice)) {
+        https.setTimeout(2500);
         https.addHeader("Content-Type", "application/json");
         https.addHeader("apikey", SUPABASE_KEY);
         https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
 
-        StaticJsonDocument<384> docDev;
-        docDev["live_ph"]         = isnan(phLevel)      ? 0.0f : phLevel;
-        docDev["live_do"]         = isnan(doMgL)        ? 0.0f : doMgL;
-        docDev["live_tds"]        = isnan(tdsPpm)       ? 0.0f : tdsPpm;
-        docDev["live_turb"]       = isnan(turbidityNTU) ? 0.0f : turbidityNTU;
-        docDev["live_temp"]       = isnan(temperatureC) ? 0.0f : temperatureC;
+        StaticJsonDocument<256> docDev;
+        docDev["ip_address"]      = WiFi.localIP().toString();
         docDev["battery_percent"] = 100;
         docDev["status"]          = "NORMAL";
         docDev["is_connected"]    = true;
@@ -283,7 +284,7 @@ void uploadToSupabasePeriodic() {
 
         int httpCode = https.PATCH(jsonDev);
         if (httpCode >= 200 && httpCode < 300) {
-            Serial.printf("[SUPABASE] Telemetri devices berhasil disinkronkan (HTTP %d)\n", httpCode);
+            Serial.printf("[SUPABASE] Status devices berhasil disinkronkan (HTTP %d)\n", httpCode);
         } else {
             Serial.printf("[SUPABASE] Gagal update devices (HTTP %d)\n", httpCode);
         }
