@@ -92,6 +92,34 @@ bool isIna226OK = false;
 
 static bool sensorPowerState = false;
 static bool jetsonPowerState = false;
+static bool jetsonShutdownPending = false;
+static unsigned long jetsonShutdownStartMs = 0;
+const unsigned long JETSON_SHUTDOWN_GRACE_PERIOD_MS = 30000UL;
+
+// ─── MQTT & SUPABASE SETTINGS (PAHO BROKER ECOSYSTEM) ─────────
+const char *MQTT_BROKER = "broker.hivemq.com"; // Broker MQTT publik (kompatibel Paho). Ganti ke IP/Domain sendiri jika ada.
+const int   MQTT_PORT   = 1883;
+const char *MQTT_USER   = "";
+const char *MQTT_PASS   = "";
+
+String TOPIC_TELEMETRY;
+String TOPIC_COMMAND;
+String TOPIC_STATUS;
+
+const char *SUPABASE_REST_URL = "https://tidmdjnjhqptszyubvue.supabase.co/rest/v1";
+const char *SUPABASE_KEY      = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpZG1kam5qaHFwdHN6eXVidnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NDMwMzEsImV4cCI6MjEwNTExOTAzMX0.G2VeWnkN5nexmaYKdA1jI9AjwM-sw1yPnF7uHlnkT20";
+
+#define MQTT_PUBLISH_INTERVAL_MS    3000UL   // 3 detik real-time
+#define SUPABASE_UPLOAD_INTERVAL_MS 60000UL  // 60 detik (1 menit) riwayat log
+
+// Prototipe fungsi dari MQTT_SUPABASE.ino & CONTROL.ino
+void initMQTT();
+void handleMQTT();
+void publishTelemetryMQTT();
+void uploadToSupabasePeriodic();
+void checkJetsonShutdownTimer();
+void publishDeviceStatus();
+void publishJetsonShutdownNotice(int secondsRemaining);
 
 static unsigned long lastSensorReadMs = 0;
 static unsigned long _lastContinuousMs = 0UL;
@@ -153,6 +181,10 @@ void setup() {
     String ipStr = wifiOK ? WiFi.localIP().toString() : "";
     showOLEDWifi(wifiOK, ipStr.c_str());
 
+    if (wifiOK) {
+      initMQTT();
+    }
+
     const int warmupSecs = WARMUP_DELAY_MS / 1000;
     Serial.print(F("Warm: "));
     for (int i = warmupSecs; i > 0; i--) {
@@ -168,6 +200,10 @@ void loop() {
   if (OPERATION_MODE == MODE_CONTINUOUS) {
     handleHTTPServer();
     handleSerialCommands();
+    handleMQTT();
+    publishTelemetryMQTT();
+    uploadToSupabasePeriodic();
+    checkJetsonShutdownTimer();
     runContinuous();
   }
 }

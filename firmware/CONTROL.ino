@@ -7,9 +7,42 @@ void powerOffSensors() {
 
 void powerOnJetson() {
     digitalWrite(PIN_MOSFET_JETSON, HIGH);
+    jetsonPowerState = true;
 }
 void powerOffJetson() {
     digitalWrite(PIN_MOSFET_JETSON, LOW);
+    jetsonPowerState = false;
+}
+
+void requestGracefulJetsonPowerOff() {
+    if (!jetsonPowerState) {
+        Serial.println(F("[POWER] Jetson sudah dalam kondisi OFF."));
+        return;
+    }
+    Serial.println(F("[POWER] Menerima instruksi Matikan Jetson!"));
+    Serial.println(F("[POWER] Memulai jeda graceful shutdown 30 detik agar OS aman..."));
+    jetsonShutdownPending = true;
+    jetsonShutdownStartMs = millis();
+    publishJetsonShutdownNotice(30);
+}
+
+void cancelJetsonShutdown() {
+    if (jetsonShutdownPending) {
+        jetsonShutdownPending = false;
+        Serial.println(F("[POWER] Hitung mundur shutdown Jetson dibatalkan."));
+    }
+}
+
+void checkJetsonShutdownTimer() {
+    if (jetsonShutdownPending) {
+        unsigned long elapsed = millis() - jetsonShutdownStartMs;
+        if (elapsed >= JETSON_SHUTDOWN_GRACE_PERIOD_MS) {
+            powerOffJetson();
+            jetsonShutdownPending = false;
+            Serial.println(F("[POWER] 30 detik tercapai. Relai MOSFET Jetson Nano diputus (OFF)."));
+            publishDeviceStatus();
+        }
+    }
 }
 
 void enterDeepSleep() {
