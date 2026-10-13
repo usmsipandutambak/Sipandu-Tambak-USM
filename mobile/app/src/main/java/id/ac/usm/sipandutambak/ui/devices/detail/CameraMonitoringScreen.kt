@@ -1,6 +1,8 @@
-﻿package id.ac.usm.sipandutambak.ui.devices.detail
+package id.ac.usm.sipandutambak.ui.devices.detail
 
+import android.webkit.WebView
 import android.widget.Toast
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -65,6 +67,8 @@ fun CameraMonitoringScreen(
     var cooldownSecondsLeft by remember { mutableStateOf(60) }
     var remainingQuota by remember { mutableStateOf(5) }
     var isAutoCameraEnabled by remember { mutableStateOf(true) }
+    var jetsonStreamUrl by remember { mutableStateOf("http://192.168.1.101:8080/stream") }
+    var useLiveStream by remember { mutableStateOf(true) }
 
     var showConfigModal by remember { mutableStateOf(false) }
 
@@ -267,7 +271,49 @@ fun CameraMonitoringScreen(
                         .height(230.dp)
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        LiveCameraWaterCanvas(modifier = Modifier.fillMaxSize())
+                        if (useLiveStream && jetsonStreamUrl.isNotBlank() && cameraState == CameraState.RECORDING) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    WebView(ctx).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.loadWithOverviewMode = true
+                                        settings.useWideViewPort = true
+                                        setBackgroundColor(android.graphics.Color.BLACK)
+                                        val html = """
+                                            <!DOCTYPE html>
+                                            <html>
+                                            <head><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"></head>
+                                            <body style="margin:0;padding:0;background:#0F172A;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;">
+                                                <img src="$jetsonStreamUrl" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';document.getElementById('err').style.display='block';"/>
+                                                <div id="err" style="display:none;color:#EF4444;font-family:sans-serif;font-size:12px;text-align:center;padding:12px;">
+                                                    Gagal memuat stream kamera.<br>Periksa URL IP/Tunnel Jetson di pengaturan.
+                                                </div>
+                                            </body>
+                                            </html>
+                                        """.trimIndent()
+                                        loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+                                    }
+                                },
+                                update = { webView ->
+                                    val html = """
+                                        <!DOCTYPE html>
+                                        <html>
+                                        <head><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"></head>
+                                        <body style="margin:0;padding:0;background:#0F172A;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;">
+                                            <img src="$jetsonStreamUrl" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';document.getElementById('err').style.display='block';"/>
+                                            <div id="err" style="display:none;color:#EF4444;font-family:sans-serif;font-size:12px;text-align:center;padding:12px;">
+                                                Gagal memuat stream kamera.<br>Periksa URL IP/Tunnel Jetson di pengaturan.
+                                            </div>
+                                        </body>
+                                        </html>
+                                    """.trimIndent()
+                                    webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            LiveCameraWaterCanvas(modifier = Modifier.fillMaxSize())
+                        }
 
                         Row(
                             modifier = Modifier
@@ -741,8 +787,12 @@ fun CameraMonitoringScreen(
 
         if (showConfigModal) {
             CameraConfigBottomSheet(
+                currentUrl = jetsonStreamUrl,
+                isLiveEnabled = useLiveStream,
                 onDismiss = { showConfigModal = false },
-                onSave = {
+                onSave = { newUrl, liveEnabled ->
+                    jetsonStreamUrl = newUrl
+                    useLiveStream = liveEnabled
                     showConfigModal = false
                     Toast.makeText(context, "Konfigurasi Kamera Berhasil Disimpan", Toast.LENGTH_SHORT).show()
                 }
@@ -773,14 +823,19 @@ private fun DigitBox(digit: Int) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CameraConfigBottomSheet(
+    currentUrl: String = "http://192.168.1.101:8080/stream",
+    isLiveEnabled: Boolean = true,
     onDismiss: () -> Unit,
-    onSave: () -> Unit
+    onSave: (newUrl: String, liveEnabled: Boolean) -> Unit
 ) {
+    var streamUrlInput by remember { mutableStateOf(currentUrl) }
+    var liveStreamToggle by remember { mutableStateOf(isLiveEnabled) }
+
     var autoExposure by remember { mutableStateOf(false) }
     var lockAe by remember { mutableStateOf(true) }
     var wdr by remember { mutableStateOf(true) }
 
-    var selectedResolution by remember { mutableStateOf("640 × 480 (VGA)") }
+    var selectedResolution by remember { mutableStateOf("1280 × 720 (HD)") }
     var selectedFps by remember { mutableStateOf("30 FPS") }
 
     ModalBottomSheet(
@@ -801,6 +856,46 @@ private fun CameraConfigBottomSheet(
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF0F172A)
             )
+
+            // URL Streaming Jetson Nano
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "🌐 Sumber URL Stream Jetson Nano",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0284C7)
+                    )
+                    Text(
+                        text = "Masukkan IP lokal (misal: http://192.168.1.101:8080/stream) atau public domain Cloudflare Tunnel (https://...trycloudflare.com/stream)",
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B)
+                    )
+
+                    OutlinedTextField(
+                        value = streamUrlInput,
+                        onValueChange = { streamUrlInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("http://192.168.1.101:8080/stream", fontSize = 12.sp) }
+                    )
+
+                    ConfigToggleItem(
+                        title = "Aktifkan Live Stream Video Asli",
+                        description = "Jika dimatikan, layar kamera akan beralih ke animasi canvas simulasi.",
+                        checked = liveStreamToggle,
+                        onCheckedChange = { liveStreamToggle = it }
+                    )
+                }
+            }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
@@ -910,7 +1005,7 @@ private fun CameraConfigBottomSheet(
             }
 
             Surface(
-                onClick = onSave,
+                onClick = { onSave(streamUrlInput, liveStreamToggle) },
                 shape = RoundedCornerShape(10.dp),
                 color = Color(0xFF0284C7),
                 modifier = Modifier

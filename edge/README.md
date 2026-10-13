@@ -10,31 +10,30 @@ Didesain untuk Jetson Nano dengan **Python 3.6.9** (bawaan JetPack) dan diakses 
 | Python | 3.6.9 (bawaan Jetson Nano) — tidak perlu upgrade |
 | OpenCV | `python3-opencv` (bawaan JetPack). Cek: `python3 -c "import cv2; print(cv2.__version__)"` |
 | NumPy | bawaan JetPack |
+| Paho MQTT | `pip3 install paho-mqtt` (untuk listener shutdown & heartbeat) |
 | GUI | **TIDAK dibutuhkan** — murni terminal/SSH |
 
-Jika OpenCV belum ada:
+Instalasi dependency tambahan (jika belum ada):
 ```bash
-sudo apt-get update && sudo apt-get install python3-opencv
+sudo apt-get update && sudo apt-get install -y python3-opencv
+pip3 install paho-mqtt
 ```
 
 ## Menjalankan
 
 ```bash
-# USB camera (/dev/video0) — paling umum
-python3 stream_camera.py
+# 1. Jalankan streaming dengan koneksi broker MQTT Paho:
+python3 stream_camera.py --mqtt-broker broker.hivemq.com --device-id Sipandu_A
 
-# Pilih kamera USB lain
-python3 stream_camera.py --camera 1
-python3 stream_camera.py --camera /dev/video0
+# 2. Kamera CSI (Raspberry Pi v2 / IMX219) + MQTT:
+python3 stream_camera.py --camera-type csi --mqtt-broker broker.hivemq.com
 
-# Kamera CSI (Raspberry Pi v2 / IMX219) — pakai GStreamer nvarguscamerasrc
-python3 stream_camera.py --camera-type csi
+# 3. Mode tes tanpa kamera fisik (diagnostic):
+python3 stream_camera.py --test-pattern --mqtt-broker broker.hivemq.com
 
-# USB camera lewat GStreamer (latensi lebih rendah)
-python3 stream_camera.py --gstreamer-usb
-
-# Tes stream tanpa kamera fisik (cek jaringan dari laptop)
-python3 stream_camera.py --test-pattern
+# 4. Membuka streaming ke internet publik (Cloudflare Tunnel):
+bash tunnel.sh
+# Salin URL https://...trycloudflare.com/stream ke aplikasi Android / Web Admin!
 ```
 
 Stop: `Ctrl+C` (ditangani rapi — kamera dilepas, thread berhenti).

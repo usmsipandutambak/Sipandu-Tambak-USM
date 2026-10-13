@@ -2,6 +2,7 @@ import argparse
 import collections
 import json
 import logging
+import os
 import platform
 import signal
 import socket
@@ -11,6 +12,12 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
+
+try:
+    import paho.mqtt.client as mqtt
+    HAVE_PAHO = True
+except ImportError:
+    HAVE_PAHO = False
 
 try:
     import cv2
@@ -395,6 +402,124 @@ class CamHandler(BaseHTTPRequestHandler):
 
 
 
+class MqttDaemon(object):
+    """Daemon listener MQTT berbasis Paho untuk Jetson Nano:
+    - Mendengarkan sinyal shutdown dari Web/Mobile/ESP32 dan mengeksekusi shutdown OS aman
+    - Mengirim heartbeat dan status telemetri kamera
+    """
+    def __init__(self, args, stats, stop_event):
+        self.args = args
+        self.stats = stats
+        self.stop_event = stop_event
+        self.client = None
+        self.topic_cmd = "sipandu/devices/{}/command".format(args.device_id)
+        self.topic_status = "sipandu/devices/{}/status".format(args.device_id)
+        self.topic_camera = "sipandu/devices/{}/camera".format(args.device_id)
+
+    def start(self):
+        if not self.args.mqtt_broker:
+            LOG.info("[MQTT] Dinonaktifkan (--mqtt-broker tidak diisi).")
+            return
+        if not HAVE_PAHO:
+            LOG.warning("[MQTT] Library 'paho-mqtt' belum terpasang.")
+            LOG.warning("        Jalankan: pip3 install paho-mqtt")
+            return
+
+        thread = threading.Thread(target=self._run, name="mqtt-daemon", daemon=True)
+        thread.start()
+
+    def _run(self):
+        client_id = "Jetson_{}_{}".format(self.args.device_id, int(time.time()))
+        LOG.info("[MQTT] Menghubungkan ke broker %s:%d (Client ID: %s)...",
+                 self.args.mqtt_broker, self.args.mqtt_port, client_id)
+        self.client = mqtt.Client(client_id=client_id)
+
+        if self.args.mqtt_user:
+            self.client.username_pw_set(self.args.mqtt_user, self.args.mqtt_pass)
+
+        def on_connect(client, userdata, flags, rc):
+            if rc == 0:
+                LOG.info("[MQTT] Terhubung ke broker MQTT (Paho)!")
+                client.subscribe(self.topic_cmd)
+                client.subscribe(self.topic_status)
+
+                status_payload = {
+                    "device": "jetson-nano",
+                    "device_id": self.args.device_id,
+                    "event": "jetson_online",
+                    "http_port": self.args.port,
+                    "tunnel_url": self.args.tunnel_url or None,
+                    "timestamp": time.time()
+                }
+                client.publish(self.topic_status, json.dumps(status_payload), retain=True)
+            else:
+                LOG.error("[MQTT] Gagal koneksi broker (rc=%d)", rc)
+
+        def on_message(client, userdata, msg):
+            try:
+                payload = json.loads(msg.payload.decode("utf-8"))
+                LOG.info("[MQTT] Pesan diterima di [%s]: %s", msg.topic, payload)
+
+                cmd = payload.get("command") or payload.get("action") or payload.get("event")
+                is_shutdown = (
+                    (cmd == "power_jetson" and payload.get("power") is False) or
+                    cmd == "shutdown" or
+                    cmd == "jetson_shutdown_countdown"
+                )
+
+                if is_shutdown:
+                    LOG.warning("=" * 60)
+                    LOG.warning("[JETSON SHUTDOWN] Sinyal Shutdown Sistem Diterima!")
+                    LOG.warning("Mengirim konfirmasi dan mengeksekusi sudo shutdown -h now...")
+                    LOG.warning("=" * 60)
+
+                    ack = {
+                        "device_id": self.args.device_id,
+                        "event": "jetson_shutting_down",
+                        "status": "OS_SHUTDOWN_IN_PROGRESS"
+                    }
+                    client.publish(self.topic_status, json.dumps(ack), qos=1)
+                    time.sleep(1.0)
+
+                    if self.args.auto_shutdown:
+                        os.system("sudo shutdown -h now")
+                    else:
+                        LOG.info("[DRY-RUN] Auto-shutdown dinonaktifkan via --no-auto-shutdown")
+            except Exception as exc:
+                LOG.error("[MQTT] Error proses pesan: %s", exc)
+
+        self.client.on_connect = on_connect
+        self.client.on_message = on_message
+
+        try:
+            self.client.connect(self.args.mqtt_broker, self.args.mqtt_port, 60)
+            self.client.loop_start()
+        except Exception as exc:
+            LOG.error("[MQTT] Gagal konek ke %s:%d: %s",
+                      self.args.mqtt_broker, self.args.mqtt_port, exc)
+            return
+
+        while not self.stop_event.is_set():
+            time.sleep(10.0)
+            if self.client and self.stats:
+                try:
+                    hb = {
+                        "device_id": self.args.device_id,
+                        "camera_ok": self.stats.camera_ok,
+                        "fps": self.stats.fps(),
+                        "clients": self.stats.clients,
+                        "width": self.stats.width,
+                        "height": self.stats.height,
+                        "tunnel_url": self.args.tunnel_url or None
+                    }
+                    self.client.publish(self.topic_camera, json.dumps(hb))
+                except Exception:
+                    pass
+
+        self.client.loop_stop()
+        self.client.disconnect()
+
+
 # ---------------------------------------------------------------------------
 # CLI + main
 # ---------------------------------------------------------------------------
@@ -443,6 +568,22 @@ def parse_args(argv=None):
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                    help="Level log (default: INFO)")
+
+    # Opsi MQTT & Tunnel
+    p.add_argument("--mqtt-broker", default="broker.hivemq.com",
+                   help="Broker MQTT (default: broker.hivemq.com, kosongkan untuk mematikan)")
+    p.add_argument("--mqtt-port", type=int, default=1883,
+                   help="Port broker MQTT (default: 1883)")
+    p.add_argument("--mqtt-user", default="",
+                   help="Username broker MQTT (opsional)")
+    p.add_argument("--mqtt-pass", default="",
+                   help="Password broker MQTT (opsional)")
+    p.add_argument("--device-id", default="Sipandu_A",
+                   help="ID perangkat (default: Sipandu_A)")
+    p.add_argument("--tunnel-url", default="",
+                   help="Public URL Cloudflare/Ngrok jika memakai tunnel")
+    p.add_argument("--no-auto-shutdown", dest="auto_shutdown", action="store_false", default=True,
+                   help="Jangan eksekusi sudo shutdown saat sinyal diterima (dry run)")
     return p.parse_args(argv)
 
 
@@ -457,6 +598,10 @@ def main(argv=None):
     stop_event = threading.Event()
     store = FrameStore()
     stats = StreamStats()
+
+    # Jalankan daemon MQTT di background
+    mqtt_daemon = MqttDaemon(args, stats, stop_event)
+    mqtt_daemon.start()
 
     worker = test_pattern_loop if args.test_pattern else capture_loop
     t = threading.Thread(
@@ -487,6 +632,9 @@ def main(argv=None):
     LOG.info("  Test halaman : http://%s:%d/            (buka di browser laptop)", ip, args.port)
     LOG.info("  Stream MJPEG  : http://%s:%d/stream", ip, args.port)
     LOG.info("  Status JSON   : http://%s:%d/api/status", ip, args.port)
+    if args.mqtt_broker:
+        LOG.info("  MQTT Broker   : %s:%d (Topic Command: sipandu/devices/%s/command)",
+                 args.mqtt_broker, args.mqtt_port, args.device_id)
     LOG.info("  Tekan Ctrl+C untuk berhenti.")
 
     t.start()
