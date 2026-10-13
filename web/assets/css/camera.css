@@ -1,0 +1,26 @@
+/* camera.css */
+.camera-frame-wrap{background:#0F172A;border-radius:var(--radius-lg);aspect-ratio:16/9;position:relative;overflow:hidden;border:2px solid #1E293B;margin-bottom:16px}
+.camera-frame-inner{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.camera-no-signal{color:#334155}
+.camera-no-signal svg{width:64px;height:64px;opacity:.4;margin:0 auto;display:block}
+.camera-no-signal h3{font-size:14px;font-weight:600;color:#64748B;text-align:center;margin-top:8px}
+.camera-no-signal p{font-size:11px;color:#475569;text-align:center}
+.camera-hud-tl{position:absolute;top:12px;left:12px;display:flex;gap:6px}
+.camera-hud-tr{position:absolute;top:12px;right:12px}
+.camera-hud-bl{position:absolute;bottom:12px;left:12px}
+.camera-hud-br{position:absolute;bottom:12px;right:12px}
+.camera-chip{background:rgba(0,0,0,.65);backdrop-filter:blur(4px);padding:4px 10px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.5px;color:#94A3B8}
+.camera-chip.red{color:#EF4444}
+.camera-chip.yellow{color:#F59E0B}
+.camera-controls{display:flex;align-items:center;gap:10px}
+.camera-info-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:16px}
+.camera-info-card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:14px}
+.camera-info-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-secondary);margin-bottom:4px}
+.camera-info-value{font-size:13px;font-weight:600;color:var(--color-text)}
+
+/* ── Jetson stream integration ─────────────────────────────────────────── */
+.camera-stream-img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1;background:#000;display:block}
+.camera-frame-wrap .camera-hud-tl,.camera-frame-wrap .camera-hud-tr,.camera-frame-wrap .camera-hud-bl,.camera-frame-wrap .camera-hud-br{z-index:3}
+.camera-chip.green{color:#22C55E}
+.camera-frame-wrap:fullscreen{aspect-ratio:auto;width:100vw;height:100vh;border-radius:0;border:none}
+.camera-frame-wrap:-webkit-full-screen{aspect-ratio:auto;width:100vw;height:100vh;border-radius:0;border:none}

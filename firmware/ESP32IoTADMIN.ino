@@ -1,0 +1,227 @@
+#include "esp_sleep.h"
+#include <Adafruit_ADS1X15.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <DallasTemperature.h>
+#include <INA226_WE.h>
+#include <OneWire.h>
+#include <Preferences.h>
+#include <WebServer.h>
+#include <WiFi.h>
+#include <Wire.h>
+
+const char *WIFI_SSID = "Sipandu Tambak";
+const char *WIFI_PASSWORD = "1234567890";
+
+const char *DEVICE_ID = "Sipandu_A";
+const int POND_NUMBER = 1;
+
+#define MODE_CONTINUOUS 1
+#define MODE_DUTY_CYCLE 2
+#define OPERATION_MODE MODE_CONTINUOUS
+
+#define PIN_MOSFET_JETSON 33
+#define PIN_MOSFET_SENSOR 32
+#define PIN_DS18B20 25
+#define PIN_SDA 21
+#define PIN_SCL 22
+
+#define PIN_MOSFET PIN_MOSFET_JETSON
+
+#define WARMUP_DELAY_MS 15000UL
+#define CONTINUOUS_INTERVAL_MS 3000UL
+#define DEEP_SLEEP_US 240000000ULL
+
+#define PH_SAMPLE_COUNT 10
+#define DO_SAMPLE_COUNT 5
+#define TDS_SAMPLE_COUNT 5
+#define TURBIDITY_SAMPLE_COUNT 5
+#define SAMPLE_INTERVAL_MS 50
+
+#define INA226_I2C_ADDR 0x44
+#define ADS_A_ADDR 0x48
+#define ADS_B_ADDR 0x49
+
+#define ADS_PH_ADDR ADS_A_ADDR
+#define ADS_DO_ADDR ADS_A_ADDR
+#define ADS_TDS_ADDR ADS_B_ADDR
+#define ADS_TURBIDITY_ADDR ADS_B_ADDR
+
+// voltage divider R1=10kΩ, R2=20kΩ koreksi = (R1+R2)/R2 = 1.5
+#define DIVIDER_CORRECTION_FACTOR 1.5f
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+
+// GAIN_TWOTHIRDS → ±6.144V, LSB = 6.144/32768 = 0.0001875V
+#define ADS_LSB_V 0.0001875f
+OneWire oneWire(PIN_DS18B20);
+DallasTemperature sensors(&oneWire);
+
+Adafruit_ADS1115 adsA;
+Adafruit_ADS1115 adsB;
+
+#define adsPH adsA
+#define adsDO adsA
+#define adsTDS adsB
+#define adsTurbidity adsB
+
+INA226_WE ina226(INA226_I2C_ADDR);
+Adafruit_SH1106G display =
+    Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Preferences prefs;
+
+WebServer server(80);
+
+float phLevel = 0.0f;
+float phVoltage = 0.0f;
+float doMgL = 0.0f;
+float doVoltage = 0.0f;
+float tdsPpm = 0.0f;
+float turbidityNTU = 0.0f;
+float temperatureC = 0.0f;
+float batVoltage = 0.0f;
+
+bool isDs18b20OK = false;
+bool isAdsAOK = false;
+bool isAdsBOK = false;
+bool isIna226OK = false;
+
+static bool sensorPowerState = false;
+static bool jetsonPowerState = false;
+
+static unsigned long lastSensorReadMs = 0;
+static unsigned long _lastContinuousMs = 0UL;
+
+#define isAdsPhOK isAdsAOK
+#define isAdsDoOK isAdsAOK
+#define isAdsTdsOK isAdsBOK
+#define isAdsTurbidityOK isAdsBOK
+
+const float minVolt = 11.0f;
+const float maxVolt = 14.1f;
+const float offsetINA = -0.50f;
+
+float phSlope = -5.70f;
+float phOffset = 21.34f;
+float doSlope = 5.5f;
+float doOffset = 0.0f;
+float tdsSlope = 500.0f;
+float tdsOffset = 0.0f;
+float turbSlope = -1120.4f;
+float turbOffset = 4895.87f;
+
+void setup() {
+
+  Serial.begin(115200);
+  delay(300);
+
+  Wire.begin(PIN_SDA, PIN_SCL);
+  Wire.setClock(50000);
+  delay(800);
+
+  pinMode(PIN_MOSFET_JETSON, OUTPUT);
+  digitalWrite(PIN_MOSFET_JETSON, LOW);
+  pinMode(PIN_MOSFET_SENSOR, OUTPUT);
+  digitalWrite(PIN_MOSFET_SENSOR, LOW);
+  delay(800);
+
+  loadCalibration();
+  delay(500);
+
+  if (OPERATION_MODE == MODE_DUTY_CYCLE) {
+    runDutyCycle();
+  } else {
+    powerOnSensors();
+    delay(250);
+
+    initOLED();
+    showOLEDI2CScan();
+    delay(400);
+
+    initSensors();
+    delay(300);
+    showOLEDStatus();
+    delay(2000);
+
+    showOLEDMessage("Connecting WiFi...");
+    connectWiFi();
+    bool wifiOK = (WiFi.status() == WL_CONNECTED);
+    String ipStr = wifiOK ? WiFi.localIP().toString() : "";
+    showOLEDWifi(wifiOK, ipStr.c_str());
+
+    const int warmupSecs = WARMUP_DELAY_MS / 1000;
+    Serial.print(F("Warm: "));
+    for (int i = warmupSecs; i > 0; i--) {
+      showOLEDWarmup(i);
+      delay(1000);
+      Serial.print(F("."));
+    }
+    Serial.println();
+  }
+}
+
+void loop() {
+  if (OPERATION_MODE == MODE_CONTINUOUS) {
+    handleHTTPServer();
+    handleSerialCommands();
+    runContinuous();
+  }
+}
+
+void initSensors() {
+  sensors.begin();
+  delay(100); // Beri waktu stabilisasi bus OneWire
+  
+  // Periksa ketersediaan perangkat
+  int devCount = sensors.getDeviceCount();
+  if (devCount > 0) {
+    isDs18b20OK = true;
+    sensors.setResolution(12);
+    Serial.printf("DS18B20 OK — Ditemukan %d sensor\n", devCount);
+  } else {
+    isDs18b20OK = false;
+    Serial.println(F("ERROR DS18B20 — Perangkat tidak terdeteksi"));
+  }
+  delay(500);
+
+  if (!adsA.begin(ADS_A_ADDR)) {
+    isAdsAOK = false;
+    Serial.println(F("ERROR ADS1115 A (0x48)"));
+  } else {
+    isAdsAOK = true;
+    adsA.setGain(GAIN_TWOTHIRDS);
+    Serial.println(F("ADS1115 A (0x48) OK — pH:A1, DO:A0"));
+  }
+  delay(500);
+
+  if (!adsB.begin(ADS_B_ADDR)) {
+    isAdsBOK = false;
+    Serial.println(F("ERROR ADS1115 B (0x49)"));
+  } else {
+    isAdsBOK = true;
+    adsB.setGain(GAIN_TWOTHIRDS);
+    Serial.println(F("ADS1115 B (0x49) OK — TDS:A1, Turbidity:A0"));
+  }
+  delay(500);
+
+  debugADSPhOLED();
+  delay(2000);
+
+  Wire.beginTransmission(INA226_I2C_ADDR);
+  if (Wire.endTransmission() == 0) {
+    isIna226OK = true;
+    ina226.init();
+    ina226.setAverage(INA226_AVERAGE_4);
+    ina226.setConversionTime(INA226_CONV_TIME_1100);
+    ina226.setMeasureMode(INA226_CONTINUOUS);
+    Serial.println(F("INA226 OK — Voltage-only mode"));
+  } else {
+    isIna226OK = false;
+    Serial.println(F("ERROR INA226"));
+  }
+  delay(500);
+}

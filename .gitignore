@@ -1,5 +1,31 @@
-# Ignore Gradle project-specific cache directory
-.gradle
+# Monorepo .gitignore for SIPANDU-TAMBAK
 
-# Ignore Gradle build output directory
-build
+# Android & Gradle
+.gradle/
+**/build/
+local.properties
+*.iml
+.kotlin/
+
+# IDE & Editors
+.idea/
+.vscode/
+.settings/
+
+# Python (Edge / Jetson)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# Arduino / ESP32 build output
+firmware/build/
+*.bin
+*.hex
+*.elf

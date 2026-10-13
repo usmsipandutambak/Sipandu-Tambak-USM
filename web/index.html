@@ -1,0 +1,719 @@
+   <!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIPANDU TAMBAK — Web Admin</title>
+  <meta name="description"
+    content="Sistem Pemantauan dan Pengendalian Kualitas Air Tambak berbasis ESP32 Local Network" />
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/dashboard.css" />
+  <link rel="stylesheet" href="assets/css/control.css" />
+  <link rel="stylesheet" href="assets/css/camera.css" />
+  <link rel="stylesheet" href="assets/css/responsive.css" />
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+
+<body>
+
+  <div class="sidebar-overlay"></div>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+            <path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+          </svg>
+          SIPANDU TAMBAK
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">Menu Utama</div>
+        <button class="nav-item active" data-route="home" id="nav-home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+          Home
+        </button>
+        <button class="nav-item" data-route="control" id="nav-control">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14" />
+          </svg>
+          Control
+        </button>
+        <button class="nav-item" data-route="camera" id="nav-camera">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M23 7l-7 5 7 5V7z" />
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+          </svg>
+          Camera
+        </button>
+        <button class="nav-item" data-route="data" id="nav-data">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <line x1="3" y1="6" x2="3.01" y2="6" />
+            <line x1="3" y1="12" x2="3.01" y2="12" />
+            <line x1="3" y1="18" x2="3.01" y2="18" />
+          </svg>
+          Data
+        </button>
+
+        <div class="nav-section-label" style="margin-top:16px">Konfigurasi</div>
+        <div style="padding:10px 20px">
+          <div class="form-group" style="margin-bottom:8px">
+            <label class="form-label" style="color:#475569">IP ESP32</label>
+            <input id="esp32-ip-input" class="form-input" type="text" placeholder="192.168.1.100"
+              style="background:#0F172A;border-color:#334155;color:#CBD5E1;font-size:12px;padding:6px 8px;font-family:'Courier New',monospace" />
+          </div>
+          <button id="esp32-ip-save" class="btn btn-primary w-full" style="font-size:11px;padding:6px 10px">
+            Terapkan IP
+          </button>
+
+          <div class="form-group" style="margin-bottom:8px;margin-top:14px">
+            <label class="form-label" style="color:#475569">IP Jetson Nano</label>
+            <input id="jetson-ip-input" class="form-input" type="text" placeholder="192.168.1.101"
+              style="background:#0F172A;border-color:#334155;color:#CBD5E1;font-size:12px;padding:6px 8px;font-family:'Courier New',monospace" />
+          </div>
+          <button id="jetson-ip-save" class="btn btn-primary w-full" style="font-size:11px;padding:6px 10px">
+            Terapkan IP Jetson
+          </button>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div>Device: <span id="sidebar-device" style="color:#94A3B8">Sipandu_A</span></div>
+        <div style="margin-top:2px">Tambak #<span id="sidebar-pond" style="color:#94A3B8">1</span></div>
+      </div>
+    </aside>
+
+    <!-- ── Main Content ──────────────────────────────── -->
+    <div class="main-content">
+
+      <!-- ── Header ────────────────────────────────── -->
+      <header class="app-header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menu-toggle" aria-label="Menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+          <span class="header-title" id="header-title">Dashboard Monitoring</span>
+        </div>
+        <div class="header-right">
+          <span class="last-update hidden" id="last-update">—</span>
+          <span class="ip-display" id="header-ip">—</span>
+          <div class="connection-badge" id="conn-badge">
+            <span class="connection-dot"></span>
+            <span id="conn-badge-text">Menghubungkan...</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- ══════════════════════════════════════════
+         PAGE: HOME
+    ══════════════════════════════════════════ -->
+      <main class="page-content active" id="page-home">
+        <div class="page-header">
+          <h2>Dashboard Monitoring</h2>
+          <p>Pemantauan kualitas air tambak secara real-time setiap 3 detik</p>
+        </div>
+
+        <!-- ESP32 Status + Camera Row -->
+        <div class="grid-2 mb-20" style="gap:16px;margin-bottom:20px">
+
+          <!-- ESP32 Status Card -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Status Perangkat</div>
+                <div class="card-subtitle">Koneksi dan status hardware</div>
+              </div>
+            </div>
+            <div class="status-row">
+              <span class="status-key">ESP32</span>
+              <span id="status-esp32" class="status-val">—</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">Wi-Fi</span>
+              <span id="status-wifi" class="status-val">—</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">ADS1115 A (pH/DO)</span>
+              <span id="status-ads-a" class="status-val">—</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">ADS1115 B (TDS/Turb)</span>
+              <span id="status-ads-b" class="status-val">—</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">DS18B20</span>
+              <span id="status-ds18b20" class="status-val">—</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">INA226</span>
+              <span id="status-ina226" class="status-val">—</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">Uptime</span>
+              <span id="esp-uptime" class="status-val font-mono">—</span>
+            </div>
+          </div>
+
+          <!-- Camera Placeholder -->
+          <div class="card" style="padding:0;overflow:hidden">
+            <div class="camera-frame-wrap"
+              style="margin:0;border-radius:var(--radius-lg);border:none;aspect-ratio:unset;height:100%;min-height:200px">
+              <img id="dash-cam-stream" class="camera-stream-img hidden" alt="Live stream Jetson Nano" />
+              <div class="camera-hud-tl">
+                <span class="camera-chip">SIPANDU CAM</span>
+                <span class="camera-chip yellow" id="dash-cam-chip">● STANDBY</span>
+              </div>
+              <div class="camera-hud-tr">
+                <span class="camera-chip">Jetson Nano</span>
+              </div>
+              <div class="camera-frame-inner" id="dash-cam-nosignal">
+                <div class="camera-no-signal">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M23 7l-7 5 7 5V7z" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" />
+                    <line x1="1" y1="1" x2="23" y2="23" stroke-opacity="0.5" />
+                  </svg>
+                  <h3>Kamera Belum Terhubung</h3>
+                  <p>Menunggu integrasi Jetson Nano</p>
+                </div>
+              </div>
+              <div class="camera-hud-bl">
+                <span class="camera-chip">Tambak #1</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sensor Grid -->
+        <div class="page-header" style="margin-bottom:12px">
+          <h2 style="font-size:14px">Pembacaan Sensor Real-Time</h2>
+        </div>
+        <div class="sensor-grid" id="sensor-grid">
+          <!-- built by dashboard.js -->
+        </div>
+
+        <!-- Offline Alert -->
+        <div id="offline-alert" class="alert alert-danger hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span>ESP32 tidak merespons — periksa koneksi jaringan dan pastikan ESP32 menyala. Data sensor tidak
+            ditampilkan untuk menghindari pembacaan yang salah.</span>
+        </div>
+      </main>
+
+      <!-- ══════════════════════════════════════════
+         PAGE: CONTROL
+    ══════════════════════════════════════════ -->
+      <main class="page-content" id="page-control">
+        <div class="page-header">
+          <h2>Kalibrasi & Kontrol</h2>
+          <p>Pengaturan kalibrasi sensor dan kontrol daya perangkat</p>
+        </div>
+
+        <!-- ── Power Control Panel ─────────────────── -->
+        <div class="power-panel">
+
+          <!-- Sensor Power -->
+          <div class="power-card">
+            <div class="power-card-header">
+              <span class="power-card-title">Daya Sensor</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)"
+                stroke-width="2">
+                <path d="M18.36 6.64a9 9 0 11-12.73 0M12 2v10" />
+              </svg>
+            </div>
+            <p class="power-card-desc">MOSFET Sensor — GPIO 33. Mengontrol daya seluruh sensor kualitas air.</p>
+            <div class="power-card-footer">
+              <span class="power-status-text" id="sensor-power-status">Tidak Aktif</span>
+              <button class="power-btn" id="sensor-power-btn">OFF</button>
+            </div>
+          </div>
+
+          <!-- Jetson Power -->
+          <div class="power-card">
+            <div class="power-card-header">
+              <span class="power-card-title">Daya Jetson Nano</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)"
+                stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <p class="power-card-desc">MOSFET Jetson — GPIO 32. Mengontrol daya Jetson Nano (integrasi mendatang).</p>
+            <div class="power-card-footer">
+              <span class="power-status-text" id="jetson-power-status">Tidak Aktif</span>
+              <button class="power-btn" id="jetson-power-btn">OFF</button>
+            </div>
+          </div>
+        </div>
+
+        <hr class="divider" />
+
+        <!-- ── pH Calibration ──────────────────────── -->
+        <div class="card mb-16">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Kalibrasi pH</div>
+              <div class="card-subtitle">ADS1115 A — Channel A1 — GAIN_ONE (±4.096V)</div>
+            </div>
+          </div>
+          <!-- Live readings -->
+          <div class="calib-live-row">
+            <div class="calib-live-item">
+              <div class="calib-live-label">Pembacaan pH</div>
+              <div class="calib-live-value"><span id="live-reading-ph">—</span></div>
+              <div class="calib-live-unit">tidak berdimensi</div>
+            </div>
+            <div class="calib-live-item">
+              <div class="calib-live-label">Tegangan ADC</div>
+              <div class="calib-live-value font-mono"><span id="live-volt-ph">—</span></div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Slope Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-slope-ph">—</span></div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Offset Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-offset-ph">—</span></div>
+            </div>
+          </div>
+          <hr class="divider" />
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="ph-slope">pH Slope</label>
+              <input id="ph-slope" class="form-input" type="number" step="0.0001" value="-5.70" placeholder="-5.70" />
+              <span class="form-hint">Rentang: -50 s/d 0. Default: -5.70</span>
+              <span class="form-error" id="ph-slope-err"></span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="ph-offset">pH Offset</label>
+              <input id="ph-offset" class="form-input" type="number" step="0.0001" value="21.34" placeholder="21.34" />
+              <span class="form-hint">Rentang: 0 s/d 100. Default: 21.34</span>
+              <span class="form-error" id="ph-offset-err"></span>
+            </div>
+          </div>
+          <div class="calib-actions">
+            <button class="btn btn-primary" id="save-ph">Simpan ke NVS</button>
+            <button class="btn btn-secondary" id="apply-ph">Terapkan</button>
+            <button class="btn btn-danger btn-sm" id="reset-ph">Reset Default</button>
+          </div>
+          <div class="calib-status-msg" id="calib-status-ph"></div>
+        </div>
+
+        <!-- ── DO Calibration ──────────────────────── -->
+        <div class="card mb-16">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Kalibrasi DO (Dissolved Oxygen)</div>
+              <div class="card-subtitle">ADS1115 A — Channel A0 — GAIN_ONE</div>
+            </div>
+          </div>
+          <div class="calib-live-row">
+            <div class="calib-live-item">
+              <div class="calib-live-label">Pembacaan DO</div>
+              <div class="calib-live-value"><span id="live-reading-do">—</span></div>
+              <div class="calib-live-unit">mg/L</div>
+            </div>
+            <div class="calib-live-item">
+              <div class="calib-live-label">Tegangan ADC</div>
+              <div class="calib-live-value font-mono"><span id="live-volt-do">—</span></div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Slope Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-slope-do">—</span></div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Offset Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-offset-do">—</span></div>
+            </div>
+          </div>
+          <hr class="divider" />
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="do-slope">DO Slope</label>
+              <input id="do-slope" class="form-input" type="number" step="0.0001" value="5.5" placeholder="5.5" />
+              <span class="form-hint">Rentang: 0 s/d 100. Default: 5.5</span>
+              <span class="form-error" id="do-slope-err"></span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="do-offset">DO Offset</label>
+              <input id="do-offset" class="form-input" type="number" step="0.0001" value="0.0" placeholder="0.0" />
+              <span class="form-hint">Rentang: -50 s/d 50. Default: 0.0</span>
+              <span class="form-error" id="do-offset-err"></span>
+            </div>
+          </div>
+          <div class="calib-actions">
+            <button class="btn btn-primary" id="save-do">Simpan ke NVS</button>
+            <button class="btn btn-secondary" id="apply-do">Terapkan</button>
+            <button class="btn btn-danger btn-sm" id="reset-do">Reset Default</button>
+          </div>
+          <div class="calib-status-msg" id="calib-status-do"></div>
+        </div>
+
+        <!-- ── TDS Calibration ─────────────────────── -->
+        <div class="card mb-16">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Kalibrasi TDS (Total Dissolved Solids)</div>
+              <div class="card-subtitle">ADS1115 B — Channel A1 — GAIN_ONE</div>
+            </div>
+          </div>
+          <div class="calib-live-row">
+            <div class="calib-live-item">
+              <div class="calib-live-label">Pembacaan TDS</div>
+              <div class="calib-live-value"><span id="live-reading-tds">—</span></div>
+              <div class="calib-live-unit">ppm</div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Slope Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-slope-tds">—</span></div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Offset Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-offset-tds">—</span></div>
+            </div>
+          </div>
+          <hr class="divider" />
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="tds-slope">TDS Slope (ppm/V)</label>
+              <input id="tds-slope" class="form-input" type="number" step="0.01" value="500.0" placeholder="500.0" />
+              <span class="form-hint">Rentang: 0 s/d 5000. Default: 500.0</span>
+              <span class="form-error" id="tds-slope-err"></span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="tds-offset">TDS Offset</label>
+              <input id="tds-offset" class="form-input" type="number" step="0.01" value="0.0" placeholder="0.0" />
+              <span class="form-hint">Rentang: -1000 s/d 1000. Default: 0.0</span>
+              <span class="form-error" id="tds-offset-err"></span>
+            </div>
+          </div>
+          <div class="calib-actions">
+            <button class="btn btn-primary" id="save-tds">Simpan ke NVS</button>
+            <button class="btn btn-secondary" id="apply-tds">Terapkan</button>
+            <button class="btn btn-danger btn-sm" id="reset-tds">Reset Default</button>
+          </div>
+          <div class="calib-status-msg" id="calib-status-tds"></div>
+        </div>
+
+        <!-- ── Turbidity Calibration ───────────────── -->
+        <div class="card mb-16">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Kalibrasi Turbidity (Kekeruhan)</div>
+              <div class="card-subtitle">ADS1115 B — Channel A0 — GAIN_ONE — Voltage Divider ×1.5</div>
+            </div>
+          </div>
+          <div class="calib-live-row">
+            <div class="calib-live-item">
+              <div class="calib-live-label">Pembacaan Turbidity</div>
+              <div class="calib-live-value"><span id="live-reading-turb">—</span></div>
+              <div class="calib-live-unit">NTU</div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Slope Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-slope-turbidity">—</span></div>
+            </div>
+            <div class="calib-live-item" style="background:var(--color-surface-2);border-color:var(--color-border)">
+              <div class="calib-live-label">Offset Aktif</div>
+              <div class="calib-live-value font-mono"><span id="live-offset-turbidity">—</span></div>
+            </div>
+          </div>
+          <hr class="divider" />
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="turb-slope">Turbidity Slope</label>
+              <input id="turb-slope" class="form-input" type="number" step="0.01" value="-1120.4"
+                placeholder="-1120.4" />
+              <span class="form-hint">Rentang: -10000 s/d 0. Default: -1120.4</span>
+              <span class="form-error" id="turbidity-slope-err"></span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="turb-offset">Turbidity Offset</label>
+              <input id="turb-offset" class="form-input" type="number" step="0.01" value="4895.87"
+                placeholder="4895.87" />
+              <span class="form-hint">Rentang: 0 s/d 20000. Default: 4895.87</span>
+              <span class="form-error" id="turbidity-offset-err"></span>
+            </div>
+          </div>
+          <div class="calib-actions">
+            <button class="btn btn-primary" id="save-turbidity">Simpan ke NVS</button>
+            <button class="btn btn-secondary" id="apply-turbidity">Terapkan</button>
+            <button class="btn btn-danger btn-sm" id="reset-turbidity">Reset Default</button>
+          </div>
+          <div class="calib-status-msg" id="calib-status-turbidity"></div>
+        </div>
+
+        <!-- ── Temperature + Battery (read-only) ────── -->
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Suhu Air — DS18B20</div>
+            </div>
+            <div class="calib-live-item" style="margin-bottom:14px">
+              <div class="calib-live-label">Pembacaan Suhu</div>
+              <div class="calib-live-value"><span id="live-reading-temp">—</span></div>
+              <div class="calib-live-unit">°C</div>
+            </div>
+            <div class="alert alert-info" style="font-size:11px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4M12 16h.01" />
+              </svg>
+              DS18B20 memiliki akurasi ±0.5°C. Koreksi offset dapat ditambahkan pada versi mendatang.
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Tegangan Baterai — INA226</div>
+            </div>
+            <div class="calib-live-item" style="margin-bottom:14px">
+              <div class="calib-live-label">Tegangan Bus</div>
+              <div class="calib-live-value"><span id="live-reading-bat">—</span></div>
+              <div class="calib-live-unit">V</div>
+            </div>
+            <div class="alert alert-info" style="font-size:11px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4M12 16h.01" />
+              </svg>
+              INA226 mengukur tegangan bus langsung. Rentang normal: 11.0V – 13.4V.
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- ══════════════════════════════════════════
+         PAGE: CAMERA
+    ══════════════════════════════════════════ -->
+      <main class="page-content" id="page-camera">
+        <div class="page-header">
+          <h2>Kamera</h2>
+          <p>Streaming langsung dari Jetson Nano — MJPEG over HTTP</p>
+        </div>
+
+        <!-- Camera Controls Bar -->
+        <div class="flex flex-between mb-12" style="flex-wrap:wrap;gap:8px">
+          <div style="font-size:12px;color:var(--color-text-secondary)">
+            Sumber: <strong>Jetson Nano</strong> · Status: <span id="cam-source-status"
+              style="color:var(--color-warning);font-weight:600">Belum Terintegrasi</span>
+          </div>
+          <div class="camera-controls">
+            <button class="btn btn-secondary btn-sm" id="camera-fullscreen-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+              Fullscreen
+            </button>
+            <button class="btn btn-secondary btn-sm" id="camera-refresh-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+              </svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <!-- Camera Frame -->
+        <div class="camera-frame-wrap" id="cam-frame-wrap">
+          <img id="cam-stream" class="camera-stream-img hidden" alt="Live stream Jetson Nano" />
+          <div class="camera-hud-tl">
+            <span class="camera-chip">SIPANDU CAM</span>
+            <span class="camera-chip yellow" id="cam-status-chip">● STANDBY</span>
+          </div>
+          <div class="camera-hud-tr">
+            <span class="camera-chip" id="cam-time">--:--:--</span>
+          </div>
+          <div class="camera-frame-inner" id="cam-nosignal">
+            <div class="camera-no-signal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+                <path d="M23 7l-7 5 7 5V7z" />
+                <rect x="1" y="5" width="15" height="14" rx="2" />
+                <line x1="1" y1="1" x2="23" y2="23" stroke-opacity="0.4" />
+              </svg>
+              <h3>Kamera Belum Terhubung</h3>
+              <p>Masukkan IP Jetson Nano di sidebar untuk memulai streaming</p>
+              <p style="margin-top:4px;font-size:10px;opacity:.6">Stream MJPEG dari
+                http://&lt;jetson&gt;:8080/stream</p>
+            </div>
+          </div>
+          <div class="camera-hud-bl">
+            <span class="camera-chip">Tambak #1</span>
+          </div>
+          <div class="camera-hud-br">
+            <span class="camera-chip red" id="cam-signal-chip">NO SIGNAL</span>
+          </div>
+        </div>
+
+        <!-- Camera Info -->
+        <div class="camera-info-grid">
+          <div class="camera-info-card">
+            <div class="camera-info-label">Perangkat Kamera</div>
+            <div class="camera-info-value" id="cam-info-device">Jetson Nano</div>
+          </div>
+          <div class="camera-info-card">
+            <div class="camera-info-label">Resolusi</div>
+            <div class="camera-info-value" id="cam-info-resolution">Menunggu koneksi…</div>
+          </div>
+          <div class="camera-info-card">
+            <div class="camera-info-label">Protokol Streaming</div>
+            <div class="camera-info-value" id="cam-info-protocol">MJPEG — multipart/x-mixed-replace</div>
+          </div>
+          <div class="camera-info-card">
+            <div class="camera-info-label">Model Deteksi</div>
+            <div class="camera-info-value">YOLOv5n — dalam pengembangan</div>
+          </div>
+        </div>
+
+        <div class="alert alert-warning mt-12">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span>Cara pakai: jalankan <span class="font-mono">python3 stream_camera.py</span> di Jetson Nano (mode
+            headless/SSH), lalu masukkan IP Jetson di sidebar. Pastikan port <strong>8080</strong> terbuka dan
+            perangkat berada di jaringan yang sama. Buka <span class="font-mono">http://&lt;jetson&gt;:8080/</span>
+            di browser untuk tes langsung.</span>
+        </div>
+      </main>
+
+      <!-- ══════════════════════════════════════════
+         PAGE: DATA
+    ══════════════════════════════════════════ -->
+      <main class="page-content" id="page-data">
+        <div class="page-header">
+          <h2>Data Sensor</h2>
+          <p>Data sementara sesi ini — otomatis terhapus saat halaman ditutup</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Riwayat Pembacaan (Sesi Ini)</div>
+              <div class="card-subtitle" id="data-row-count">Menunggu data...</div>
+            </div>
+            <div class="alert alert-warning" style="padding:6px 10px;font-size:10px;margin-bottom:0">
+              Data hanya disimpan di RAM browser — hilang saat halaman ditutup
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <table id="data-table" style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead id="data-thead" style="background:var(--color-surface-2)">
+                <!-- built by data.js -->
+              </thead>
+              <tbody id="data-tbody">
+                <!-- built by data.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+
+    </div><!-- /.main-content -->
+  </div><!-- /.app-shell -->
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- Scripts (order matters) -->
+  <script src="assets/js/utils.js"></script>
+  <script src="assets/js/esp32-api.js"></script>
+  <script src="assets/js/jetson-api.js"></script>
+  <script src="assets/js/realtime.js"></script>
+  <script src="assets/js/router.js"></script>
+  <script src="assets/js/dashboard.js"></script>
+  <script src="assets/js/calibration.js"></script>
+  <script src="assets/js/control.js"></script>
+  <script src="assets/js/camera.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/app.js"></script>
+
+  <script>
+    // ── Extra UI wiring that needs DOM ─────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+
+      // Camera clock
+      function updateCamTime() {
+        const el = document.getElementById('cam-time');
+        if (el) el.textContent = new Date().toLocaleTimeString('id-ID', { hour12: false });
+      }
+      setInterval(updateCamTime, 1000);
+      updateCamTime();
+
+      // Status page wiring from Realtime
+      Realtime.on('status', (data) => {
+        if (!data) return;
+        const s = (ok) => ok
+          ? '<span style="color:var(--color-success);font-weight:600">OK</span>'
+          : '<span style="color:var(--color-danger);font-weight:600">ERROR</span>';
+        const setHTML = (id, h) => { const e = document.getElementById(id); if (e) e.innerHTML = h; };
+        setHTML('status-esp32', '<span style="color:var(--color-success);font-weight:600">Online</span>');
+        setHTML('status-wifi', data.wifi_connected
+          ? `<span style="color:var(--color-success);font-weight:600">Connected</span>`
+          : `<span style="color:var(--color-warning);font-weight:600">Disconnected</span>`);
+        if (data.sensor_status) {
+          setHTML('status-ads-a', s(data.sensor_status?.ads_a));
+          setHTML('status-ads-b', s(data.sensor_status?.ads_b));
+          setHTML('status-ds18b20', s(data.sensor_status?.ds18b20));
+          setHTML('status-ina226', s(data.sensor_status?.ina226));
+        }
+      });
+
+      Realtime.on('connection', (connected) => {
+        const alertEl = document.getElementById('offline-alert');
+        if (alertEl) alertEl.classList.toggle('hidden', connected);
+        if (!connected) {
+          ['status-esp32', 'status-wifi', 'status-ads-a', 'status-ads-b', 'status-ds18b20', 'status-ina226']
+            .forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = '<span style="color:var(--color-offline)">Offline</span>'; });
+        }
+      });
+
+      // Data table styling
+      const style = document.createElement('style');
+      style.textContent = `
+    #data-table th { padding:10px 12px; text-align:left; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--color-text-secondary); border-bottom:1px solid var(--color-border); }
+    #data-table td { padding:9px 12px; border-bottom:1px solid var(--color-border); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    #data-table tr:last-child td { border-bottom:none; }
+    #data-table tr:hover td { background:var(--color-surface-2); }
+  `;
+      document.head.appendChild(style);
+    });
+  </script>
+
+</body>
+
+</html>
