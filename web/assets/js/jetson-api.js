@@ -2,28 +2,38 @@
 'use strict';
 
 const JetsonConfig = {
-  baseURL: 'http://192.168.100.41:8080',          // diisi lewat sidebar (IP Jetson) — contoh: http://192.168.1.101:8080
-  defaultPort: 8080,    // port default stream_camera.py di Jetson
+  baseURL: 'http://192.168.100.41:5000',
+  defaultPort: 5000,
+  defaultStreamPath: '/video_feed',
   timeout: 5000,
-  statusInterval: 3000, // interval polling /api/status (ms)
+  statusInterval: 5000,
 };
 
 const JetsonAPI = (() => {
   let _baseURL = JetsonConfig.baseURL;
+  let _streamPath = JetsonConfig.defaultStreamPath;
 
   /**
    * Normalisasi input user:
-   *   "192.168.1.101"        -> http://192.168.1.101:8080
-   *   "192.168.1.101:9000"   -> http://192.168.1.101:9000
-   *   "http://192.168.1.101" -> http://192.168.1.101:8080
+   *   "192.168.100.41"                        -> base: http://192.168.100.41:5000, path: /video_feed
+   *   "192.168.100.41:5000"                   -> base: http://192.168.100.41:5000, path: /video_feed
+   *   "http://192.168.100.41:5000/video_feed" -> base: http://192.168.100.41:5000, path: /video_feed
    */
   function _normalize(host) {
-    let url = String(host || '').trim().replace(/\/+$/, '');
-    if (!url) return '';
-    if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
-    const rest = url.replace(/^https?:\/\//i, '');
-    if (!/:\d+$/.test(rest)) url += ':' + JetsonConfig.defaultPort;
-    return url;
+    let raw = String(host || '').trim().replace(/\/+$/, '');
+    if (!raw) return { base: '', path: JetsonConfig.defaultStreamPath };
+    if (!/^https?:\/\//i.test(raw)) raw = 'http://' + raw;
+    try {
+      const u = new URL(raw);
+      const port = u.port || String(JetsonConfig.defaultPort);
+      const base = `${u.protocol}//${u.hostname}:${port}`;
+      const path = (u.pathname && u.pathname !== '/') ? u.pathname : JetsonConfig.defaultStreamPath;
+      return { base, path };
+    } catch (_) {
+      const rest = raw.replace(/^https?:\/\//i, '');
+      const base = /:\d+$/.test(rest) ? raw : `${raw}:${JetsonConfig.defaultPort}`;
+      return { base, path: JetsonConfig.defaultStreamPath };
+    }
   }
 
   /** GET JSON dari Jetson dengan timeout + error handling (ala esp32-api.js) */
@@ -44,18 +54,31 @@ const JetsonAPI = (() => {
   }
 
   return {
-    setHost(host)      { _baseURL = _normalize(host); },
-    setBaseURL(url)    { _baseURL = _normalize(url); },
+    setHost(host) {
+      const parsed = _normalize(host);
+      _baseURL = parsed.base;
+      _streamPath = parsed.path;
+    },
+    setBaseURL(url) {
+      const parsed = _normalize(url);
+      _baseURL = parsed.base;
+      _streamPath = parsed.path;
+    },
     getBaseURL()       { return _baseURL; },
+    getStreamPath()    { return _streamPath; },
     isConfigured()     { return !!_baseURL; },
 
-    /** GET /api/status — status kamera + stream dari Jetson */
+    /** GET /api/status — opsional untuk server dengan endpoint metadata */
     getStatus()        { return _fetch('/api/status'); },
 
-    /** URL stream MJPEG (cache-buster tiap pemanggilan) */
-    getStreamURL()     { return _baseURL ? `${_baseURL}/stream?cb=${Date.now()}` : ''; },
+    /** URL stream MJPEG aktual (default: http://192.168.100.41:5000/video_feed) */
+    getStreamURL(cacheBust = false) {
+      if (!_baseURL) return '';
+      const baseStream = `${_baseURL}${_streamPath}`;
+      return cacheBust ? `${baseStream}?cb=${Date.now()}` : baseStream;
+    },
 
-    /** URL snapshot JPEG tunggal (fallback bila MJPEG gagal) */
+    /** URL snapshot JPEG tunggal (fallback bila tersedia) */
     getSnapshotURL()   { return _baseURL ? `${_baseURL}/snapshot.jpg?cb=${Date.now()}` : ''; },
   };
 })();

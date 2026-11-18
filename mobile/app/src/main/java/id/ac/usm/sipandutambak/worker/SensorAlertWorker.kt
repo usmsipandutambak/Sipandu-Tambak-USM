@@ -4,19 +4,13 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import id.ac.usm.sipandutambak.data.api.SupabaseApi
+import id.ac.usm.sipandutambak.data.api.optNullableDoubleAny
 import id.ac.usm.sipandutambak.ui.util.AlertMonitor
-import org.json.JSONObject
 
 class SensorAlertWorker(
     private val context: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(context, workerParams) {
-
-    private fun JSONObject.nullableDouble(key: String): Double? {
-        if (!has(key) || isNull(key)) return null
-        val v = optDouble(key, Double.NaN)
-        return if (v.isNaN()) null else v
-    }
 
     override suspend fun doWork(): Result {
         return try {
@@ -31,15 +25,16 @@ class SensorAlertWorker(
 
                 val pondNumber = dev.optInt("pond_number", 0)
                 val pondName = if (pondNumber > 0) "Kolam " + pondNumber else dev.optString("name", id)
+                val latestLog = SupabaseApi.getLatestSensorLog(id)
 
                 AlertMonitor.process(
                     context = context,
                     deviceId = id,
                     pondName = pondName,
-                    ph = dev.nullableDouble("live_ph"),
-                    tds = dev.nullableDouble("live_tds"),
-                    temp = dev.nullableDouble("live_temp"),
-                    doLevel = dev.nullableDouble("live_do")
+                    ph = latestLog?.optNullableDoubleAny("ph_level", "ph") ?: dev.optNullableDoubleAny("live_ph", "ph_level"),
+                    tds = latestLog?.optNullableDoubleAny("tds_ppm", "tds") ?: dev.optNullableDoubleAny("live_tds", "tds_ppm"),
+                    temp = latestLog?.optNullableDoubleAny("temperature_c", "temp") ?: dev.optNullableDoubleAny("live_temp", "temperature_c"),
+                    doLevel = latestLog?.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do") ?: dev.optNullableDoubleAny("live_do", "do_level", "dissolved_oxygen")
                 )
             }
 

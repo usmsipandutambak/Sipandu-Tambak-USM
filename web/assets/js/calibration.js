@@ -28,20 +28,37 @@ const CALIB_DEFS = [
   },
 ];
 
+function _applyCalibrationToInputs(data) {
+  if (!data) return;
+  CALIB_DEFS.forEach(def => {
+    const s = data[def.apiKey];
+    if (!s) return;
+    const slopeEl  = document.getElementById(def.slopeId);
+    const offsetEl = document.getElementById(def.offsetId);
+    if (slopeEl && s.slope !== undefined && s.slope !== null)  slopeEl.value  = s.slope;
+    if (offsetEl && s.offset !== undefined && s.offset !== null) offsetEl.value = s.offset;
+    updateLiveDisplay(def.id, s.slope, s.offset);
+  });
+}
+
 async function loadCalibration() {
+  if (window.SupabaseSync) {
+    try {
+      const supaData = await SupabaseSync.getCalibration();
+      _applyCalibrationToInputs(supaData);
+    } catch (_) {}
+  }
+
   try {
-    const data = await ESP32API.getCalibration();
-    CALIB_DEFS.forEach(def => {
-      const s = data[def.apiKey];
-      if (!s) return;
-      const slopeEl  = document.getElementById(def.slopeId);
-      const offsetEl = document.getElementById(def.offsetId);
-      if (slopeEl)  slopeEl.value  = s.slope;
-      if (offsetEl) offsetEl.value = s.offset;
-      updateLiveDisplay(def.id, s.slope, s.offset);
-    });
+    const espData = await ESP32API.getCalibration();
+    _applyCalibrationToInputs(espData);
+    if (window.SupabaseSync) {
+      await SupabaseSync.saveCalibration(espData).catch(() => {});
+    }
   } catch (err) {
-    Utils.toast('Gagal memuat kalibrasi: ' + err.message, 'error');
+    if (!window.SupabaseSync) {
+      Utils.toast('Gagal memuat kalibrasi: ' + err.message, 'error');
+    }
   }
 }
 
@@ -66,42 +83,56 @@ function validateAndGetValues(def) {
   return { slope: sRes.val, offset: oRes.val };
 }
 
-async function saveCalib(def) {
-  const btn = document.getElementById(`save-${def.id}`);
+async function _syncCalib(def, btn, actionLabel) {
   const values = validateAndGetValues(def);
   if (!values) { Utils.toast('Validasi gagal — periksa input', 'error'); return; }
 
   Utils.btnLoading(btn, true);
+  let supabaseOk = false;
+  let esp32Ok = false;
+  let espError = '';
+
+  try {
+    if (window.SupabaseSync) {
+      await SupabaseSync.saveCalibration({ [def.apiKey]: values });
+      supabaseOk = true;
+    }
+  } catch (err) {
+    console.warn('[Calibration] Gagal sinkron ke Supabase:', err.message);
+  }
+
   try {
     await ESP32API.postCalibration({ [def.apiKey]: values });
-    updateLiveDisplay(def.id, values.slope, values.offset);
-    Utils.toast(`Kalibrasi ${def.label} disimpan ke NVS`, 'success');
-    setStatusMsg(def.id, 'Tersimpan', 'success');
+    esp32Ok = true;
   } catch (err) {
-    Utils.toast(`Gagal menyimpan: ${err.message}`, 'error');
-    setStatusMsg(def.id, err.message, 'error');
-  } finally {
-    Utils.btnLoading(btn, false);
+    espError = err.message;
   }
+
+  updateLiveDisplay(def.id, values.slope, values.offset);
+
+  if (supabaseOk && esp32Ok) {
+    Utils.toast(`Kalibrasi ${def.label} ${actionLabel} ke Supabase & ESP32`, 'success');
+    setStatusMsg(def.id, 'Tersimpan (Supabase + ESP32)', 'success');
+  } else if (supabaseOk) {
+    Utils.toast(`Kalibrasi ${def.label} disimpan ke Supabase (ESP32 offline: ${espError})`, 'info');
+    setStatusMsg(def.id, 'Tersimpan di Supabase (ESP32 offline)', 'info');
+  } else if (esp32Ok) {
+    Utils.toast(`Kalibrasi ${def.label} ${actionLabel} ke ESP32`, 'success');
+    setStatusMsg(def.id, 'Tersimpan di ESP32', 'success');
+  } else {
+    Utils.toast(`Gagal menyimpan: ${espError || 'Periksa koneksi Supabase/ESP32'}`, 'error');
+    setStatusMsg(def.id, espError || 'Gagal menyimpan', 'error');
+  }
+
+  Utils.btnLoading(btn, false);
+}
+
+async function saveCalib(def) {
+  return _syncCalib(def, document.getElementById(`save-${def.id}`), 'disimpan');
 }
 
 async function applyCalib(def) {
-  const btn = document.getElementById(`apply-${def.id}`);
-  const values = validateAndGetValues(def);
-  if (!values) { Utils.toast('Validasi gagal — periksa input', 'error'); return; }
-
-  Utils.btnLoading(btn, true);
-  try {
-    await ESP32API.postCalibration({ [def.apiKey]: values });
-    updateLiveDisplay(def.id, values.slope, values.offset);
-    Utils.toast(`Kalibrasi ${def.label} diterapkan`, 'success');
-    setStatusMsg(def.id, 'Diterapkan', 'success');
-  } catch (err) {
-    Utils.toast(`Gagal menerapkan: ${err.message}`, 'error');
-    setStatusMsg(def.id, err.message, 'error');
-  } finally {
-    Utils.btnLoading(btn, false);
-  }
+  return _syncCalib(def, document.getElementById(`apply-${def.id}`), 'diterapkan');
 }
 
 async function resetCalib(def) {
@@ -110,9 +141,15 @@ async function resetCalib(def) {
 
   Utils.btnLoading(btn, true);
   try {
-    await ESP32API.resetCalibration(def.apiKey);
+    const defValues = window.SupabaseSync?.DEFAULT_CALIBRATION?.[def.apiKey];
+    if (window.SupabaseSync && defValues) {
+      await SupabaseSync.saveCalibration({ [def.apiKey]: defValues }).catch(() => {});
+    }
+    try {
+      await ESP32API.resetCalibration(def.apiKey);
+    } catch (_) {}
     await loadCalibration();
-    Utils.toast(`Kalibrasi ${def.label} direset`, 'info');
+    Utils.toast(`Kalibrasi ${def.label} direset ke default`, 'info');
     setStatusMsg(def.id, 'Reset ke default', 'info');
   } catch (err) {
     Utils.toast(`Gagal reset: ${err.message}`, 'error');
@@ -144,13 +181,14 @@ function initCalibration() {
 // Update live readings from Realtime data
 function updateCalibLiveReadings(sensorData, voltageData) {
   if (!sensorData) return;
+  const doVal = sensorData.do_mg_l ?? sensorData.do_level ?? sensorData.dissolved_oxygen ?? sensorData.do;
   const liveMap = {
-    ph:         { valId: 'live-reading-ph',   val: sensorData.ph,            volt: voltageData?.ph_voltage },
-    do:         { valId: 'live-reading-do',   val: sensorData.do_mg_l,       volt: voltageData?.do_voltage },
-    tds:        { valId: 'live-reading-tds',  val: sensorData.tds_ppm,       volt: null },
-    turbidity:  { valId: 'live-reading-turb', val: sensorData.turbidity_ntu, volt: null },
-    temperature:{ valId: 'live-reading-temp', val: sensorData.temperature_c, volt: null },
-    battery:    { valId: 'live-reading-bat',  val: sensorData.battery_voltage,volt: null },
+    ph:         { valId: 'live-reading-ph',   val: sensorData.ph ?? sensorData.ph_level,     volt: voltageData?.ph_voltage },
+    do:         { valId: 'live-reading-do',   val: doVal,                                     volt: voltageData?.do_voltage },
+    tds:        { valId: 'live-reading-tds',  val: sensorData.tds_ppm ?? sensorData.tds,      volt: null },
+    turbidity:  { valId: 'live-reading-turb', val: sensorData.turbidity_ntu ?? sensorData.turbidity, volt: null },
+    temperature:{ valId: 'live-reading-temp', val: sensorData.temperature_c ?? sensorData.temperature, volt: null },
+    battery:    { valId: 'live-reading-bat',  val: sensorData.battery_voltage,                volt: null },
   };
   Object.entries(liveMap).forEach(([k, v]) => {
     const el = document.getElementById(v.valId);

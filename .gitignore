@@ -2,30 +2,53 @@
 
 # Android & Gradle
 .gradle/
+**/.gradle/
+mobile/.gradle/
+mobile/build/
+mobile/app/build/
 **/build/
 local.properties
+mobile/local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
 *.iml
 .kotlin/
+mobile/.kotlin/
 
 # IDE & Editors
 .idea/
+**/.idea/
 .vscode/
+**/.vscode/
 .settings/
+**/.settings/
 
-# Python (Edge / Jetson)
+# Python (Edge / Jetson & Tests)
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 venv/
+.venv/
 .env
+.env.*
 
-# OS
+# Web / Node accidental artifacts
+node_modules/
+web/package-lock.json
+
+# OS & Logs
 .DS_Store
 Thumbs.db
 *.swp
+*.log
 
 # Arduino / ESP32 build output
 firmware/build/
+firmware/ESP32IoTADMIN/build/
 *.bin
 *.hex
 *.elf

@@ -30,6 +30,29 @@ const Realtime = (() => {
       _emit('status',  status);
       _emit('sensors', sensors);
     } catch (err) {
+      if (window.SupabaseSync) {
+        try {
+          const rows = await SupabaseSync.getLatestSensorLogs(undefined, 1);
+          if (Array.isArray(rows) && rows.length > 0) {
+            const r = rows[0];
+            _lastDataMs = Date.now();
+            _setConnected(true);
+            _emit('sensors', {
+              source: 'supabase',
+              sensors: {
+                ph:              r.ph_level,
+                do_mg_l:         r.do_level ?? r.dissolved_oxygen ?? r.do ?? null,
+                tds_ppm:         r.tds_ppm,
+                turbidity_ntu:   r.turbidity_ntu,
+                temperature_c:   r.temperature_c,
+                battery_voltage: r.battery_voltage,
+              },
+              sensor_status: { ads_a: true, ads_b: true, ds18b20: true, ina226: true },
+            });
+            return;
+          }
+        } catch (_) {}
+      }
       _setConnected(false);
       _emit('sensors', null);
       console.warn('[Realtime] Poll failed:', err.message);

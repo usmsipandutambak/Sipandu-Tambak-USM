@@ -8,24 +8,66 @@ import java.io.BufferedReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
+
+fun JSONObject.optNullableDoubleAny(vararg keys: String): Double? {
+    for (key in keys) {
+        if (has(key) && !isNull(key)) {
+            val v = optDouble(key, Double.NaN)
+            if (!v.isNaN()) return v
+        }
+    }
+    return null
+}
+
+fun JSONObject.optNullableStringAny(vararg keys: String): String? {
+    for (key in keys) {
+        if (has(key) && !isNull(key)) {
+            val raw = optString(key, "").trim()
+            if (raw.isNotEmpty() && !raw.equals("null", ignoreCase = true)) {
+                return raw
+            }
+        }
+    }
+    return null
+}
+
+fun formatSensorMetric(value: Double?, decimals: Int = 1, fallback: String = "N/A"): String {
+    if (value == null || value.isNaN()) return fallback
+    return if (decimals == 0) {
+        value.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.${decimals}f", value)
+    }
+}
 
 object SupabaseApi {
     private const val BASE_URL = "https://tidmdjnjhqptszyubvue.supabase.co"
     private const val ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpZG1kam5qaHFwdHN6eXVidnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NDMwMzEsImV4cCI6MjEwNTExOTAzMX0.G2VeWnkN5nexmaYKdA1jI9AjwM-sw1yPnF7uHlnkT20"
 
-    suspend fun getDevices(): JSONArray = withContext(Dispatchers.IO) {
-        try {
-            val endpoint = URL(BASE_URL + "/rest/v1/devices?select=*&order=pond_number.asc")
-            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("apikey", ANON_KEY)
-                setRequestProperty("Authorization", "Bearer " + ANON_KEY)
-                connectTimeout = 8000
-                readTimeout = 8000
-            }
+    private fun executeGetJsonArray(pathWithQuery: String, timeoutMs: Int = 8000): JSONArray {
+        val endpoint = URL(BASE_URL + pathWithQuery)
+        val conn = (endpoint.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            setRequestProperty("apikey", ANON_KEY)
+            setRequestProperty("Authorization", "Bearer " + ANON_KEY)
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
+        }
+        return try {
             if (conn.responseCode == 200) {
                 JSONArray(conn.inputStream.bufferedReader().use(BufferedReader::readText))
-            } else JSONArray()
+            } else {
+                JSONArray()
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    suspend fun getDevices(): JSONArray = withContext(Dispatchers.IO) {
+        try {
+            executeGetJsonArray("/rest/v1/devices?select=*&order=pond_number.asc")
         } catch (e: Exception) {
             e.printStackTrace()
             JSONArray()
@@ -82,37 +124,29 @@ object SupabaseApi {
 
     suspend fun getLiveDeviceTelemetry(deviceId: String): JSONObject? = withContext(Dispatchers.IO) {
         try {
-            val endpoint = URL(BASE_URL + "/rest/v1/devices?id=eq." + deviceId + "&select=live_ph,live_tds,live_temp,live_turb,live_do,battery_percent,status")
-            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("apikey", ANON_KEY)
-                setRequestProperty("Authorization", "Bearer " + ANON_KEY)
-                connectTimeout = 4000
-                readTimeout = 4000
-            }
-            if (conn.responseCode == 200) {
-                val array = JSONArray(conn.inputStream.bufferedReader().use(BufferedReader::readText))
-                if (array.length() > 0) array.getJSONObject(0) else null
-            } else null
+            val logs = executeGetJsonArray("/rest/v1/sensor_logs?device_id=eq.$deviceId&select=*&order=created_at.desc&limit=1", 6000)
+            if (logs.length() > 0) return@withContext logs.getJSONObject(0)
+
+            val dev = executeGetJsonArray("/rest/v1/devices?id=eq.$deviceId&select=*", 6000)
+            if (dev.length() > 0) dev.getJSONObject(0) else null
         } catch (e: Exception) {
             null
         }
     }
 
+    suspend fun getLatestSensorLogs(limit: Int = 50): JSONArray = withContext(Dispatchers.IO) {
+        try {
+            executeGetJsonArray("/rest/v1/sensor_logs?select=*&order=created_at.desc&limit=$limit")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            JSONArray()
+        }
+    }
+
     suspend fun getLatestSensorLog(deviceId: String): JSONObject? = withContext(Dispatchers.IO) {
         try {
-            val endpoint = URL(BASE_URL + "/rest/v1/sensor_logs?device_id=eq." + deviceId + "&order=created_at.desc&limit=1")
-            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("apikey", ANON_KEY)
-                setRequestProperty("Authorization", "Bearer " + ANON_KEY)
-                connectTimeout = 8000
-                readTimeout = 8000
-            }
-            if (conn.responseCode == 200) {
-                val array = JSONArray(conn.inputStream.bufferedReader().use(BufferedReader::readText))
-                if (array.length() > 0) array.getJSONObject(0) else null
-            } else null
+            val array = executeGetJsonArray("/rest/v1/sensor_logs?device_id=eq.$deviceId&select=*&order=created_at.desc&limit=1")
+            if (array.length() > 0) array.getJSONObject(0) else null
         } catch (e: Exception) {
             e.printStackTrace()
             null
@@ -121,17 +155,7 @@ object SupabaseApi {
 
     suspend fun getSensorLogs(deviceId: String, limit: Int = 20): JSONArray = withContext(Dispatchers.IO) {
         try {
-            val endpoint = URL(BASE_URL + "/rest/v1/sensor_logs?device_id=eq." + deviceId + "&order=created_at.desc&limit=" + limit)
-            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("apikey", ANON_KEY)
-                setRequestProperty("Authorization", "Bearer " + ANON_KEY)
-                connectTimeout = 8000
-                readTimeout = 8000
-            }
-            if (conn.responseCode == 200) {
-                JSONArray(conn.inputStream.bufferedReader().use(BufferedReader::readText))
-            } else JSONArray()
+            executeGetJsonArray("/rest/v1/sensor_logs?device_id=eq.$deviceId&select=*&order=created_at.desc&limit=$limit")
         } catch (e: Exception) {
             e.printStackTrace()
             JSONArray()
@@ -140,25 +164,25 @@ object SupabaseApi {
 
     suspend fun getSensorLogsByPond(pondNumber: Int, limit: Int = 30): JSONArray = withContext(Dispatchers.IO) {
         try {
-            val endpoint = URL(BASE_URL + "/rest/v1/sensor_logs?pond_number=eq." + pondNumber + "&order=created_at.desc&limit=" + limit)
-            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("apikey", ANON_KEY)
-                setRequestProperty("Authorization", "Bearer " + ANON_KEY)
-                connectTimeout = 8000
-                readTimeout = 8000
-            }
-            if (conn.responseCode == 200) {
-                JSONArray(conn.inputStream.bufferedReader().use(BufferedReader::readText))
-            } else JSONArray()
+            executeGetJsonArray("/rest/v1/sensor_logs?pond_number=eq.$pondNumber&select=*&order=created_at.desc&limit=$limit")
         } catch (e: Exception) {
             e.printStackTrace()
             JSONArray()
         }
     }
 
-    suspend fun updateDeviceCalibration(deviceId: String, calibrationJson: JSONObject): Boolean = withContext(Dispatchers.IO) {
+    suspend fun getDeviceCalibration(deviceId: String): JSONObject? = withContext(Dispatchers.IO) {
         try {
+            val array = executeGetJsonArray("/rest/v1/devices?id=eq.$deviceId&select=*", 6000)
+            if (array.length() > 0) array.getJSONObject(0) else null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    suspend fun updateDeviceCalibration(deviceId: String, calibrationJson: JSONObject): Boolean = withContext(Dispatchers.IO) {
+        fun patchPayload(payload: JSONObject): Int {
             val endpoint = URL(BASE_URL + "/rest/v1/devices?id=eq." + deviceId)
             val conn = (endpoint.openConnection() as HttpURLConnection).apply {
                 requestMethod = "PATCH"
@@ -170,11 +194,47 @@ object SupabaseApi {
                 connectTimeout = 8000
                 readTimeout = 8000
             }
-            val payload = JSONObject().apply {
-                put("calibration_data", calibrationJson.toString())
+            return try {
+                OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
+                conn.responseCode
+            } finally {
+                conn.disconnect()
             }
-            OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
-            conn.responseCode in 200..204
+        }
+
+        try {
+            val phObj = calibrationJson.optJSONObject("ph")
+            val tdsObj = calibrationJson.optJSONObject("tds")
+            val turbObj = calibrationJson.optJSONObject("turbidity")
+            val doObj = calibrationJson.optJSONObject("do")
+
+            val corePayload = JSONObject().apply {
+                if (phObj != null) {
+                    put("ph_slope", phObj.optDouble("slope", -5.70))
+                    put("ph_offset", phObj.optDouble("offset", 21.34))
+                }
+                if (tdsObj != null) {
+                    put("tds_slope", tdsObj.optDouble("slope", 500.0))
+                    put("tds_offset", tdsObj.optDouble("offset", 0.0))
+                }
+                if (turbObj != null) {
+                    put("turb_slope", turbObj.optDouble("slope", -1120.4))
+                    put("turb_offset", turbObj.optDouble("offset", 4895.87))
+                }
+            }
+
+            val extendedPayload = JSONObject(corePayload.toString()).apply {
+                if (doObj != null) {
+                    put("do_slope", doObj.optDouble("slope", 5.5))
+                    put("do_offset", doObj.optDouble("offset", 0.0))
+                }
+            }
+
+            var code = patchPayload(extendedPayload)
+            if (code == 400 && corePayload.length() > 0) {
+                code = patchPayload(corePayload)
+            }
+            code in 200..204
         } catch (e: Exception) {
             e.printStackTrace()
             false

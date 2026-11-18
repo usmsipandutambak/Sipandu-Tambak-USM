@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.ac.usm.sipandutambak.R
+import id.ac.usm.sipandutambak.data.api.formatSensorMetric
 
 @Composable
 fun SipanduHeader(
@@ -245,14 +246,20 @@ fun TelemetryLogSection(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(log.timeLabel, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
-                            Text(log.ph.toString(), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
-                            Text((log.tds ?: 0.0).toInt().toString(), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
-                            Text("" + log.temperature + "°C", fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
-                            Text("" + (log.turbidity ?: 0.0).toInt(), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
+                            Text(formatSensorMetric(log.ph, 2), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
+                            Text(formatSensorMetric(log.tds, 0), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
+                            Text(
+                                text = log.temperature?.let { "${formatSensorMetric(it, 1)}°C" } ?: "N/A",
+                                fontSize = 9.sp,
+                                color = Color(0xFF0F172A),
+                                modifier = Modifier.width(65.dp),
+                                textAlign = TextAlign.Center
+                            )
+                            Text(formatSensorMetric(log.turbidity, 1), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
                             Text(log.cod, fontSize = 9.sp, color = Color(0xFF94A3B8), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
                             Text(log.nh4, fontSize = 9.sp, color = Color(0xFF94A3B8), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
                             Text(log.no3, fontSize = 9.sp, color = Color(0xFF94A3B8), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
-                            Text(log.doLevel.toString(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
+                            Text(formatSensorMetric(log.doLevel, 1), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
 
                             Box(modifier = Modifier.width(80.dp), contentAlignment = Alignment.Center) {
                                 Surface(

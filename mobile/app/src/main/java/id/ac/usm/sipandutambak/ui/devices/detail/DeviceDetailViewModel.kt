@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import id.ac.usm.sipandutambak.data.api.SupabaseApi
+import id.ac.usm.sipandutambak.data.api.formatSensorMetric
+import id.ac.usm.sipandutambak.data.api.optNullableDoubleAny
+import id.ac.usm.sipandutambak.data.api.optNullableStringAny
 import id.ac.usm.sipandutambak.util.CsvExportHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,21 +24,15 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-private fun org.json.JSONObject.optNullableDouble(key: String): Double? {
-    if (!has(key) || isNull(key)) return null
-    val v = optDouble(key, Double.NaN)
-    return if (v.isNaN()) null else v
-}
-
 data class SensorLogRow(
     val timeLabel: String,
     val ph: Double?,
     val tds: Double?,
     val temperature: Double? = null,
     val turbidity: Double? = null,
-    val cod: String = "-",
-    val nh4: String = "-",
-    val no3: String = "-",
+    val cod: String = "N/A",
+    val nh4: String = "N/A",
+    val no3: String = "N/A",
     val doLevel: Double? = null,
     val status: String = "NORMAL",
     val fullTime: String = ""
@@ -75,20 +72,21 @@ data class DeviceDetailUiState(
     val currentTemp: Double? = null,
     val currentTurbidity: Double? = null,
     val currentDo: Double? = null,
-    val currentCod: String = "-",
-    val currentNh4: String = "-",
-    val currentNo3: String = "-",
+    val currentCod: String = "N/A",
+    val currentNh4: String = "N/A",
+    val currentNo3: String = "N/A",
     val hasData: Boolean = false,
     val logs: List<SensorLogRow> = emptyList(),
     val trendPoints: List<Double> = emptyList(),
     val stats: TrendStats = TrendStats(),
     val selectedRange: TrendTimeRange = TrendTimeRange.HOURS_24,
-    val tdsConfig: SensorParamConfig = SensorParamConfig(slope = "", offset = ""),
-    val phConfig: SensorParamConfig = SensorParamConfig(slope = "-6,78", offset = "0,5"),
-    val codConfig: SensorParamConfig = SensorParamConfig(slope = "-6,78", offset = "0,5"),
-    val nh4Config: SensorParamConfig = SensorParamConfig(slope = "-6,78", offset = "0,5"),
-    val no3Config: SensorParamConfig = SensorParamConfig(slope = "-6,78", offset = "0,5"),
-    val doConfig: SensorParamConfig = SensorParamConfig(slope = "-6,78", offset = "0,5")
+    val tdsConfig: SensorParamConfig = SensorParamConfig(slope = "500.0", offset = "0.0"),
+    val phConfig: SensorParamConfig = SensorParamConfig(slope = "-5.70", offset = "21.34"),
+    val turbConfig: SensorParamConfig = SensorParamConfig(slope = "-1120.4", offset = "4895.87"),
+    val codConfig: SensorParamConfig = SensorParamConfig(slope = "1.0", offset = "0.0"),
+    val nh4Config: SensorParamConfig = SensorParamConfig(slope = "1.0", offset = "0.0"),
+    val no3Config: SensorParamConfig = SensorParamConfig(slope = "1.0", offset = "0.0"),
+    val doConfig: SensorParamConfig = SensorParamConfig(slope = "5.5", offset = "0.0")
 )
 
 class DeviceDetailViewModel(
@@ -104,49 +102,51 @@ class DeviceDetailViewModel(
     init {
         val dateStr = SimpleDateFormat("dd MMM yyyy", Locale("id", "ID")).format(Date())
         _uiState.update { it.copy(currentDateFormatted = dateStr) }
+        loadCalibrationFromSupabase()
         startRealtimePolling()
+    }
+
+    fun loadCalibrationFromSupabase() {
+        if (deviceId.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val dev = SupabaseApi.getDeviceCalibration(deviceId) ?: return@launch
+                _uiState.update { current ->
+                    current.copy(
+                        phConfig = SensorParamConfig(
+                            slope = dev.optNullableDoubleAny("ph_slope")?.toString() ?: current.phConfig.slope,
+                            offset = dev.optNullableDoubleAny("ph_offset")?.toString() ?: current.phConfig.offset
+                        ),
+                        tdsConfig = SensorParamConfig(
+                            slope = dev.optNullableDoubleAny("tds_slope")?.toString() ?: current.tdsConfig.slope,
+                            offset = dev.optNullableDoubleAny("tds_offset")?.toString() ?: current.tdsConfig.offset
+                        ),
+                        turbConfig = SensorParamConfig(
+                            slope = dev.optNullableDoubleAny("turb_slope")?.toString() ?: current.turbConfig.slope,
+                            offset = dev.optNullableDoubleAny("turb_offset")?.toString() ?: current.turbConfig.offset
+                        ),
+                        doConfig = SensorParamConfig(
+                            slope = dev.optNullableDoubleAny("do_slope")?.toString() ?: current.doConfig.slope,
+                            offset = dev.optNullableDoubleAny("do_offset")?.toString() ?: current.doConfig.offset
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private fun startRealtimePolling() {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch(Dispatchers.IO) {
-            var tickCount = 0
             while (isActive) {
                 try {
-                    val liveObj = SupabaseApi.getLiveDeviceTelemetry(deviceId)
-                    if (liveObj != null) {
-                        _uiState.update {
-                            it.copy(
-                                hasData = true,
-                                currentPh = liveObj.optNullableDouble("live_ph"),
-                                currentTds = liveObj.optNullableDouble("live_tds"),
-                                currentTemp = liveObj.optNullableDouble("live_temp"),
-                                currentTurbidity = liveObj.optNullableDouble("live_turb"),
-                                currentDo = liveObj.optNullableDouble("live_do"),
-                                status = liveObj.optString("status", it.status)
-                            )
-                        }
-                    } else {
-                        _uiState.update {
-                            it.copy(
-                                hasData = false,
-                                currentPh = null,
-                                currentTds = null,
-                                currentTemp = null,
-                                currentTurbidity = null,
-                                currentDo = null
-                            )
-                        }
-                    }
-
-                    if (tickCount % 15 == 0) {
-                        loadTelemetryDataInternal()
-                    }
-                    tickCount++
+                    loadTelemetryDataInternal()
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                delay(1000)
+                delay(5000)
             }
         }
     }
@@ -154,7 +154,13 @@ class DeviceDetailViewModel(
     private suspend fun loadTelemetryDataInternal() {
         if (deviceId.isBlank()) return
         try {
-            val jsonLogs = SupabaseApi.getSensorLogs(deviceId, limit = 25)
+            var jsonLogs = SupabaseApi.getSensorLogs(deviceId, limit = 25)
+            if (jsonLogs.length() == 0) {
+                val pondNum = _uiState.value.pondName.filter { it.isDigit() }.toIntOrNull()
+                if (pondNum != null) {
+                    jsonLogs = SupabaseApi.getSensorLogsByPond(pondNum, limit = 25)
+                }
+            }
             val list = mutableListOf<SensorLogRow>()
 
             val inFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
@@ -174,26 +180,65 @@ class DeviceDetailViewModel(
                 val formattedTime = parsedDate?.let { outFormat.format(it) } ?: "-"
                 val fullTime = parsedDate?.let { fullFormat.format(it) } ?: "-"
 
+                val codVal = obj.optNullableDoubleAny("cod", "cod_mg_l")?.let { formatSensorMetric(it, 1) }
+                    ?: obj.optNullableStringAny("cod")
+                    ?: "N/A"
+                val nh4Val = obj.optNullableDoubleAny("nh4", "nh4_mg_l", "amonia")?.let { formatSensorMetric(it, 2) }
+                    ?: obj.optNullableStringAny("nh4")
+                    ?: "N/A"
+                val no3Val = obj.optNullableDoubleAny("no3", "no3_mg_l", "nitrat")?.let { formatSensorMetric(it, 2) }
+                    ?: obj.optNullableStringAny("no3")
+                    ?: "N/A"
+
                 list.add(
                     SensorLogRow(
                         timeLabel = formattedTime,
                         fullTime = fullTime,
-                        ph = obj.optNullableDouble("ph_level"),
-                        tds = obj.optNullableDouble("tds_ppm"),
-                        temperature = obj.optNullableDouble("temperature_c"),
-                        turbidity = obj.optNullableDouble("turbidity_ntu"),
-                        doLevel = obj.optNullableDouble("do_level"),
+                        ph = obj.optNullableDoubleAny("ph_level", "ph", "live_ph"),
+                        tds = obj.optNullableDoubleAny("tds_ppm", "tds", "live_tds"),
+                        temperature = obj.optNullableDoubleAny("temperature_c", "temperature", "temp", "live_temp"),
+                        turbidity = obj.optNullableDoubleAny("turbidity_ntu", "turbidity", "turb", "live_turb"),
+                        cod = codVal,
+                        nh4 = nh4Val,
+                        no3 = no3Val,
+                        doLevel = obj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do"),
                         status = obj.optString("status", "NORMAL")
                     )
                 )
             }
 
-            if (list.isNotEmpty()) {
+            val latest = list.firstOrNull()
+            if (latest != null) {
                 _uiState.update { current ->
                     current.copy(
+                        hasData = true,
+                        currentPh = latest.ph,
+                        currentTds = latest.tds,
+                        currentTemp = latest.temperature,
+                        currentTurbidity = latest.turbidity,
+                        currentDo = latest.doLevel,
+                        currentCod = latest.cod,
+                        currentNh4 = latest.nh4,
+                        currentNo3 = latest.no3,
+                        status = latest.status,
                         logs = list,
                         trendPoints = list.mapNotNull { it.ph }.reversed()
                     )
+                }
+            } else {
+                val liveObj = SupabaseApi.getLiveDeviceTelemetry(deviceId)
+                if (liveObj != null) {
+                    _uiState.update { current ->
+                        current.copy(
+                            hasData = true,
+                            currentPh = liveObj.optNullableDoubleAny("ph_level", "live_ph", "ph"),
+                            currentTds = liveObj.optNullableDoubleAny("tds_ppm", "live_tds", "tds"),
+                            currentTemp = liveObj.optNullableDoubleAny("temperature_c", "live_temp", "temp"),
+                            currentTurbidity = liveObj.optNullableDoubleAny("turbidity_ntu", "live_turb", "turb"),
+                            currentDo = liveObj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do"),
+                            status = liveObj.optString("status", current.status)
+                        )
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -250,6 +295,10 @@ class DeviceDetailViewModel(
         _uiState.update { it.copy(phConfig = SensorParamConfig(slope, offset)) }
     }
 
+    fun updateTurbConfig(slope: String, offset: String) {
+        _uiState.update { it.copy(turbConfig = SensorParamConfig(slope, offset)) }
+    }
+
     fun updateCodConfig(slope: String, offset: String) {
         _uiState.update { it.copy(codConfig = SensorParamConfig(slope, offset)) }
     }
@@ -277,12 +326,15 @@ class DeviceDetailViewModel(
             val doOffset = parse(state.doConfig.offset)
             val tdsSlope = parse(state.tdsConfig.slope)
             val tdsOffset = parse(state.tdsConfig.offset)
+            val turbSlope = parse(state.turbConfig.slope)
+            val turbOffset = parse(state.turbConfig.offset)
 
             val payload = org.json.JSONObject().apply {
                 put("command", "calibrate")
                 put("ph", org.json.JSONObject().put("slope", phSlope).put("offset", phOffset))
                 put("do", org.json.JSONObject().put("slope", doSlope).put("offset", doOffset))
                 put("tds", org.json.JSONObject().put("slope", tdsSlope).put("offset", tdsOffset))
+                put("turbidity", org.json.JSONObject().put("slope", turbSlope).put("offset", turbOffset))
             }
 
             val ok = if (deviceId.isNotBlank()) SupabaseApi.updateDeviceCalibration(deviceId, payload) else false

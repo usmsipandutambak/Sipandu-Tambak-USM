@@ -1,125 +1,93 @@
-# jetson-stream — Server Kamera MJPEG untuk Jetson Nano
+# SIPANDU-TAMBAK — Edge Camera & AI Service (`edge/`)
 
-Server streaming kamera **headless** (tanpa GUI) untuk SIPANDU TAMBAK.
-Didesain untuk Jetson Nano dengan **Python 3.6.9** (bawaan JetPack) dan diakses lewat SSH.
+Direktori `edge/` berisi skrip layanan kamera *headless* untuk **NVIDIA Jetson Nano (`192.168.100.41`)** agar dapat menyajikan *live MJPEG stream* ke **Web Admin** dan **Aplikasi Mobile Android**, sekaligus mendengarkan instruksi *graceful shutdown* melalui MQTT.
 
-## Kebutuhan
+---
 
-| Item | Keterangan |
-|------|------------|
-| Python | 3.6.9 (bawaan Jetson Nano) — tidak perlu upgrade |
-| OpenCV | `python3-opencv` (bawaan JetPack). Cek: `python3 -c "import cv2; print(cv2.__version__)"` |
-| NumPy | bawaan JetPack |
-| Paho MQTT | `pip3 install paho-mqtt` (untuk listener shutdown & heartbeat) |
-| GUI | **TIDAK dibutuhkan** — murni terminal/SSH |
+## Arsitektur Streaming Kamera Jetson Nano
 
-Instalasi dependency tambahan (jika belum ada):
+1. **Endpoint Aktif Produksi (`:5000/video_feed`)**:
+   - Web Admin (`web/`) dan Aplikasi Android (`mobile/`) dikonfigurasi secara default mengarah ke **`http://192.168.100.41:5000/video_feed`** (layanan Flask/OpenCV MJPEG & inferensi objek ikan pada Jetson Nano).
+2. **Server Stream Standalone (`stream_camera.py`)**:
+   - Skrip Python *headless* (kompatibel **Python 3.6.9+** bawaan JetPack tanpa GUI) yang membaca kamera **USB (`V4L2`)**, **CSI (`nvarguscamerasrc`)**, atau **`--test-pattern`**.
+   - Terintegrasi dengan `paho-mqtt` pada topik `sipandu/devices/SIPANDU_A/command` (`192.168.100.41:1883`) untuk mengeksekusi `sudo shutdown -h now` saat instruksi `power_jetson: false` dikirim dari ESP32/Web Admin.
+
+---
+
+## Kebutuhan Sistem
+
+| Komponen | Keterangan |
+| :--- | :--- |
+| Python | 3.6.9+ (bawaan NVIDIA JetPack) |
+| OpenCV & NumPy | `python3-opencv` & `numpy` |
+| Paho MQTT | `pip3 install paho-mqtt` |
+
+Instalasi dependensi di Jetson Nano:
 ```bash
 sudo apt-get update && sudo apt-get install -y python3-opencv
 pip3 install paho-mqtt
 ```
 
-## Menjalankan
+---
+
+## Menjalankan Server Kamera (`stream_camera.py`)
 
 ```bash
-# 1. Jalankan streaming dengan koneksi broker MQTT Paho:
-python3 stream_camera.py --mqtt-broker broker.hivemq.com --device-id Sipandu_A
+cd edge
 
-# 2. Kamera CSI (Raspberry Pi v2 / IMX219) + MQTT:
-python3 stream_camera.py --camera-type csi --mqtt-broker broker.hivemq.com
+# 1. Jalankan stream USB kamera + listener MQTT (broker Jetson lokal)
+python3 stream_camera.py --port 5000 --mqtt-broker 192.168.100.41 --device-id SIPANDU_A
 
-# 3. Mode tes tanpa kamera fisik (diagnostic):
-python3 stream_camera.py --test-pattern --mqtt-broker broker.hivemq.com
+# 2. Kamera CSI (IMX219 / Raspberry Pi Cam v2)
+python3 stream_camera.py --camera-type csi --port 5000 --mqtt-broker 192.168.100.41
 
-# 4. Membuka streaming ke internet publik (Cloudflare Tunnel):
-bash tunnel.sh
-# Salin URL https://...trycloudflare.com/stream ke aplikasi Android / Web Admin!
+# 3. Mode uji tanpa kamera fisik (test pattern)
+python3 stream_camera.py --test-pattern --port 5000 --no-auto-shutdown
 ```
 
-Stop: `Ctrl+C` (ditangani rapi — kamera dilepas, thread berhenti).
+> Catatan: Default bawaan CLI `--port` di `stream_camera.py` adalah `8080` dengan endpoint `/stream`, `/snapshot.jpg`, dan `/api/status`. Gunakan `--port 5000` atau sesuaikan port/path stream pada Web Admin & Android jika menjalankan `stream_camera.py` langsung.
 
-## Endpoint
+### Opsi CLI Utama
+| Flag | Default | Deskripsi |
+| :--- | :--- | :--- |
+| `--host` | `0.0.0.0` | Bind address HTTP server |
+| `--port` | `8080` | Port HTTP server |
+| `--camera` | `0` | Index/device kamera USB (`0`, `/dev/video0`, dll.) |
+| `--camera-type` | `usb` | Jenis input kamera: `usb` atau `csi` |
+| `--width` / `--height` | `1280` / `720` | Resolusi frame |
+| `--fps` / `--quality` | `30` / `80` | Target FPS dan kualitas JPEG (`1–100`) |
+| `--mqtt-broker` | `192.168.100.41` | Alamat broker MQTT |
+| `--mqtt-port` | `1883` | Port broker MQTT |
+| `--device-id` | `SIPANDU_A` | ID perangkat topik MQTT |
+| `--no-auto-shutdown` | `false` | Nonaktifkan eksekusi `sudo shutdown` (*dry run*) |
 
-| URL | Deskripsi |
-|-----|-----------|
-| `http://<ip-jetson>:8080/` | Halaman tes sederhana (langsung menampilkan stream) |
-| `http://<ip-jetson>:8080/stream` | Stream MJPEG (`multipart/x-mixed-replace`) |
-| `http://<ip-jetson>:8080/snapshot.jpg` | Satu frame JPEG |
-| `http://<ip-jetson>:8080/api/status` | Status JSON (CORS `*`, dipakai Web Admin) |
+---
 
-Respons `/api/status` (contoh):
-```json
-{
-  "device": "jetson-nano",
-  "hostname": "jetson",
-  "python": "3.6.9",
-  "opencv": "4.1.1",
-  "camera": { "type": "usb", "source": "0", "width": 1280, "height": 720, "fps_target": 30 },
-  "stream": { "width": 1280, "height": 720, "fps": 29.8, "jpeg_quality": 80, "frames": 1234 },
-  "clients": 1,
-  "camera_ok": true
-}
-```
+## Publikasi Tunnel & Autostart (`systemd`)
 
-## Opsi CLI Lengkap
+- **Akses Publik (`tunnel.sh`)**:
+  ```bash
+  bash tunnel.sh
+  ```
+  Untuk mengekspos stream MJPEG lokal melalui Cloudflare Tunnel (`trycloudflare.com`) / Ngrok.
+- **Autostart Systemd**:
+  ```bash
+  sudo tee /etc/systemd/system/sipandu-cam.service <<'EOF'
+  [Unit]
+  Description=SIPANDU CAM - Jetson MJPEG server
+  After=network.target
 
-```
---host            Bind address (default: 0.0.0.0)
---port            Port HTTP (default: 8080)
---camera          Index/perangkat USB: 0 / 1 / /dev/video0 (default: 0)
---camera-type     usb | csi (default: usb)
---sensor-id       Sensor ID untuk CSI (default: 0)
---gstreamer-usb   Pakai pipeline GStreamer v4l2src untuk USB
---width           Lebar frame (default: 1280)
---height          Tinggi frame (default: 720)
---fps             Target FPS (default: 30)
---quality         Kualitas JPEG 1-100 (default: 80)
---flip            none | h | v | hv (balik gambar)
---test-pattern    Frame sintetis tanpa kamera
---log-level       DEBUG | INFO | WARNING | ERROR (default: INFO)
-```
+  [Service]
+  User=jetson
+  WorkingDirectory=/home/jetson/SIPANDU-TAMBAK/edge
+  ExecStart=/usr/bin/python3 stream_camera.py --camera-type usb --port 5000
+  Restart=on-failure
+  RestartSec=3
 
-> **Catatan CSI:** gunakan resolusi/framerate yang didukung sensor
-> (mis. IMX219: 1280x720@30, 1920x1080@30, 3280x2464@21).
+  [Install]
+  WantedBy=multi-user.target
+  EOF
 
-## Autostart saat Boot (systemd)
-
-```bash
-sudo tee /etc/systemd/system/sipandu-cam.service <<'EOF'
-[Unit]
-Description=SIPANDU CAM - Jetson MJPEG server
-After=network.target
-
-[Service]
-User=jetson
-WorkingDirectory=/home/jetson
-ExecStart=/usr/bin/python3 /home/jetson/stream_camera.py --camera-type usb
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now sipandu-cam
-journalctl -u sipandu-cam -f   # lihat log
-```
-
-(Ganti `User=` dan path sesuai username/lokasi file di Jetson Anda.)
-
-## Integrasi Web Admin
-
-1. Jalankan server di Jetson (lihat di atas).
-2. Buka Web Admin → sidebar **IP Jetson Nano** → masukkan IP → **Terapkan IP Jetson**.
-3. Frame kamera Dashboard & halaman Camera menampilkan stream otomatis.
-
-## Troubleshooting
-
-| Gejala | Solusi |
-|--------|--------|
-| `Kamera tidak bisa dibuka` | Cek `ls /dev/video*`, colok-ulang kamera, tutup aplikasi lain yang memakai kamera |
-| Frame sangat lambat | Turunkan `--width/--height`, naikkan `--quality` ke atas? (justru turunkan quality ke 60), pakai `--gstreamer-usb` |
-| Tidak bisa diakses dari laptop | Pastikan satu jaringan, cek `ping <ip-jetson>`, buka port: `sudo ufw allow 8080` |
-| CSI hitam/erroneous | Cek pipeline `nvidia-l4t-multimedia` terpasang, resolusi didukung sensor |
-| Stream putus-putus | Kurangi resolusi/FPS; pastikan tidak terlalu banyak klien (`clients` di `/api/status`) |
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now sipandu-cam
+  ```

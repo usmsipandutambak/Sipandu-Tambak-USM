@@ -2,11 +2,11 @@
 'use strict';
 
 const MQTTConfig = {
-  host: 'broker.hivemq.com',
-  port: 8000,             // WebSocket port default HiveMQ (atau 8884 wss)
+  host: '192.168.100.41',
+  port: 8000,             // WebSocket port broker lokal atau HiveMQ (8000)
   path: '/mqtt',
   useSSL: false,
-  deviceId: 'Sipandu_A',
+  deviceId: 'SIPANDU_A',
   enabled: true,
 };
 

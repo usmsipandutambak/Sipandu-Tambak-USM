@@ -16,7 +16,7 @@ const char *WIFI_SSID = "Sipandu Tambak";
 const char *WIFI_PASSWORD = "1234567890";
 
 const char *DEVICE_ID = "SIPANDU_A";
-const int POND_NUMBER = 1;
+const int POND_NUMBER = 5; // ALAT A - KOLAM 5
 
 #define MODE_CONTINUOUS 1
 #define MODE_DUTY_CYCLE 2
@@ -97,7 +97,7 @@ static unsigned long jetsonShutdownStartMs = 0;
 const unsigned long JETSON_SHUTDOWN_GRACE_PERIOD_MS = 30000UL;
 
 // ─── MQTT & SUPABASE SETTINGS (PAHO BROKER ECOSYSTEM) ─────────
-const char *MQTT_BROKER = "broker.hivemq.com"; // Broker MQTT publik (kompatibel Paho). Ganti ke IP/Domain sendiri jika ada.
+const char *MQTT_BROKER = "192.168.100.41"; // Broker MQTT lokal (Jetson Nano). Ganti ke "broker.hivemq.com" jika pakai broker publik.
 const int   MQTT_PORT   = 1883;
 const char *MQTT_USER   = "";
 const char *MQTT_PASS   = "";
@@ -193,6 +193,11 @@ void setup() {
       Serial.print(F("."));
     }
     Serial.println();
+
+    // Baca seluruh sensor sekali setelah warm-up agar nilai awal tidak 0
+    readAllSensors();
+    markSensorReadTime();
+    updateOLED();
   }
 }
 

@@ -142,6 +142,20 @@ fun CalibrationScreen(
                 )
             }
 
+            // Sensor Turbidity
+            item {
+                SensorCalibrationBlock(
+                    title = "Kalibrasi Sensor - Turbidity",
+                    slopeLabel = "Slope  Turbidity (NTU/V)",
+                    slopeValue = state.turbConfig.slope,
+                    onSlopeChange = { viewModel.updateTurbConfig(it, state.turbConfig.offset) },
+                    offsetLabel = "Offset Turbidity",
+                    offsetValue = state.turbConfig.offset,
+                    onOffsetChange = { viewModel.updateTurbConfig(state.turbConfig.slope, it) },
+                    iconType = "DROP"
+                )
+            }
+
             // Sensor COD
             item {
                 SensorCalibrationBlock(

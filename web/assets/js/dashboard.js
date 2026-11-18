@@ -3,12 +3,12 @@
 
 // ── Water quality thresholds (aquaculture references) ─────────────────────
 const THRESHOLDS = {
-  ph:          { warn_lo: 6.5, crit_lo: 6.0, warn_hi: 8.5, crit_hi: 9.0, unit: '' },
-  do_mg_l:     { warn_lo: 4.0, crit_lo: 3.0, warn_hi: 14.0, crit_hi: 20.0, unit: 'mg/L' },
-  tds_ppm:     { warn_lo: 0,   crit_lo: 0,   warn_hi: 800,  crit_hi: 1200, unit: 'ppm' },
-  turbidity_ntu:{ warn_lo: 0,  crit_lo: 0,   warn_hi: 50,   crit_hi: 100,  unit: 'NTU' },
-  temperature_c:{ warn_lo: 22, crit_lo: 18,  warn_hi: 32,   crit_hi: 35,   unit: '°C' },
-  battery_voltage:{ warn_lo: 11.5, crit_lo: 11.0, warn_hi: 14.0, crit_hi: 15.0, unit: 'V' },
+  ph: { warn_lo: 6.5, crit_lo: 6.0, warn_hi: 8.5, crit_hi: 9.0, unit: '' },
+  do_mg_l: { warn_lo: 4.0, crit_lo: 3.0, warn_hi: 14.0, crit_hi: 20.0, unit: 'mg/L' },
+  tds_ppm: { warn_lo: 0, crit_lo: 0, warn_hi: 800, crit_hi: 1200, unit: 'ppm' },
+  turbidity_ntu: { warn_lo: 0, crit_lo: 0, warn_hi: 50, crit_hi: 100, unit: 'NTU' },
+  temperature_c: { warn_lo: 22, crit_lo: 18, warn_hi: 32, crit_hi: 35, unit: '°C' },
+  battery_voltage: { warn_lo: 11.5, crit_lo: 11.0, warn_hi: 14.0, crit_hi: 15.0, unit: 'V' },
 };
 
 function getSensorStatus(key, val) {
@@ -21,12 +21,12 @@ function getSensorStatus(key, val) {
 
 // ── Sensor Card Definitions ───────────────────────────────────────────────
 const SENSOR_DEFS = [
-  { id: 'ph',             key: 'ph',              label: 'pH',         unit: '',     decimals: 2, hwKey: 'ads_a' },
-  { id: 'do',             key: 'do_mg_l',         label: 'DO',         unit: 'mg/L', decimals: 2, hwKey: 'ads_a' },
-  { id: 'tds',            key: 'tds_ppm',         label: 'TDS',        unit: 'ppm',  decimals: 0, hwKey: 'ads_b' },
-  { id: 'turbidity',      key: 'turbidity_ntu',   label: 'Turbidity',  unit: 'NTU',  decimals: 1, hwKey: 'ads_b' },
-  { id: 'temperature',    key: 'temperature_c',   label: 'Suhu',       unit: '°C',   decimals: 1, hwKey: 'ds18b20' },
-  { id: 'battery',        key: 'battery_voltage', label: 'Baterai',    unit: 'V',    decimals: 2, hwKey: 'ina226' },
+  { id: 'ph', key: 'ph', label: 'pH', unit: '', decimals: 2, hwKey: 'ads_a' },
+  { id: 'do', key: 'do_mg_l', label: 'DO', unit: 'mg/L', decimals: 2, hwKey: 'ads_a' },
+  { id: 'tds', key: 'tds_ppm', label: 'TDS', unit: 'ppm', decimals: 0, hwKey: 'ads_b' },
+  { id: 'turbidity', key: 'turbidity_ntu', label: 'Turbidity', unit: 'NTU', decimals: 1, hwKey: 'ads_b' },
+  { id: 'temperature', key: 'temperature_c', label: 'Suhu', unit: '°C', decimals: 1, hwKey: 'ds18b20' },
+  { id: 'battery', key: 'battery_voltage', label: 'Baterai', unit: 'V', decimals: 2, hwKey: 'ina226' },
 ];
 
 function buildSensorCards() {
@@ -49,10 +49,10 @@ function buildSensorCards() {
 
 function updateSensorCards(sensorData, sensorStatus, isConnected) {
   SENSOR_DEFS.forEach(s => {
-    const card      = document.getElementById(`sc-${s.id}`);
-    const valEl     = document.getElementById(`sv-${s.id}`);
-    const indEl     = document.getElementById(`si-${s.id}`);
-    const badgeEl   = document.getElementById(`sb-${s.id}`);
+    const card = document.getElementById(`sc-${s.id}`);
+    const valEl = document.getElementById(`sv-${s.id}`);
+    const indEl = document.getElementById(`si-${s.id}`);
+    const badgeEl = document.getElementById(`sb-${s.id}`);
     if (!card || !valEl || !indEl || !badgeEl) return;
 
     // Determine hardware sensor OK status
@@ -67,7 +67,14 @@ function updateSensorCards(sensorData, sensorStatus, isConnected) {
       return;
     }
 
-    const val = sensorData[s.key];
+    let val = sensorData[s.key];
+    if (val === undefined || val === null) {
+      if (s.id === 'ph') val = sensorData.ph_level;
+      else if (s.id === 'do') val = sensorData.do_level ?? sensorData.dissolved_oxygen ?? sensorData.do ?? sensorData.live_do;
+      else if (s.id === 'tds') val = sensorData.tds;
+      else if (s.id === 'turbidity') val = sensorData.turbidity;
+      else if (s.id === 'temperature') val = sensorData.temperature;
+    }
     if (val === undefined || val === null) {
       valEl.textContent = '—';
       indEl.className = 'sensor-indicator ' + (hwOK ? 'ok' : 'error');
@@ -88,10 +95,10 @@ function updateSensorCards(sensorData, sensorStatus, isConnected) {
 }
 
 function updateESP32Status(statusData, isConnected) {
-  const dot      = document.getElementById('conn-dot');
-  const badge    = document.getElementById('conn-badge');
+  const dot = document.getElementById('conn-dot');
+  const badge = document.getElementById('conn-badge');
   const badgeText = document.getElementById('conn-badge-text');
-  const ipEl     = document.getElementById('header-ip');
+  const ipEl = document.getElementById('header-ip');
   const uptimeEl = document.getElementById('esp-uptime');
 
   if (badge) badge.className = `connection-badge ${isConnected ? 'online' : 'offline'}`;

@@ -22,10 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── ESP32 IP Configuration ─────────────────────────────────────────────
   const ipInput    = document.getElementById('esp32-ip-input');
   const ipSaveBtn  = document.getElementById('esp32-ip-save');
-  const savedIP    = sessionStorage.getItem('esp32_ip');
+  const savedIP    = localStorage.getItem('esp32_ip') || sessionStorage.getItem('esp32_ip') || '192.168.100.213';
 
   if (savedIP) {
-    ESP32API.setBaseURL('http://' + savedIP);
+    ESP32API.setBaseURL('http://' + savedIP.replace(/^https?:\/\//i, ''));
     if (ipInput) ipInput.value = savedIP;
   }
 
@@ -33,7 +33,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ipSaveBtn.addEventListener('click', () => {
       const ip = ipInput.value.trim();
       if (!ip) { Utils.toast('Masukkan alamat IP ESP32', 'error'); return; }
-      ESP32API.setBaseURL('http://' + ip);
+      ESP32API.setBaseURL('http://' + ip.replace(/^https?:\/\//i, ''));
+      localStorage.setItem('esp32_ip', ip);
       sessionStorage.setItem('esp32_ip', ip);
       Realtime.restart();
       Utils.toast('IP ESP32 diperbarui: ' + ip, 'success');
@@ -43,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Jetson Nano IP Configuration (camera stream) ─────────────────────────
   const jetsonInput    = document.getElementById('jetson-ip-input');
   const jetsonSaveBtn  = document.getElementById('jetson-ip-save');
-  const savedJetson    = sessionStorage.getItem('jetson_host');
+  const savedJetson    = localStorage.getItem('jetson_host') || sessionStorage.getItem('jetson_host') || '192.168.100.41';
 
   if (savedJetson) {
     JetsonAPI.setHost(savedJetson);
@@ -55,9 +56,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const host = jetsonInput.value.trim();
       if (!host) { Utils.toast('Masukkan alamat IP Jetson Nano', 'error'); return; }
       JetsonAPI.setHost(host);
+      localStorage.setItem('jetson_host', host);
       sessionStorage.setItem('jetson_host', host);
       CameraModule.restart();
-      Utils.toast('IP Jetson diperbarui: ' + JetsonAPI.getBaseURL(), 'success');
+      Utils.toast('Stream Jetson dimuat: ' + JetsonAPI.getStreamURL(), 'success');
     });
   }
 

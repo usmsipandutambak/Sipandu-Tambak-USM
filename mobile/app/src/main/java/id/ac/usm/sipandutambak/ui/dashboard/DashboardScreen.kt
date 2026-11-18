@@ -40,8 +40,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import id.ac.usm.sipandutambak.R
 import id.ac.usm.sipandutambak.data.api.SupabaseApi
+import id.ac.usm.sipandutambak.data.api.formatSensorMetric
+import id.ac.usm.sipandutambak.data.api.optNullableDoubleAny
+import id.ac.usm.sipandutambak.data.api.optNullableStringAny
 import id.ac.usm.sipandutambak.ui.components.AppSidebarMenu
 import id.ac.usm.sipandutambak.ui.devices.DeviceListViewModel
+import id.ac.usm.sipandutambak.ui.devices.detail.SensorMetricTile
 import id.ac.usm.sipandutambak.ui.util.AlertLevel
 import id.ac.usm.sipandutambak.ui.util.ParamAlert
 import id.ac.usm.sipandutambak.ui.util.WaterQualityRules
@@ -59,7 +63,7 @@ enum class MapPondStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Data realtime kolam (dibaca langsung dari tabel devices di Supabase)
+// Data realtime kolam (disinkronkan dari tabel devices + sensor_logs Supabase)
 // ---------------------------------------------------------------------------
 
 data class LivePond(
@@ -70,7 +74,15 @@ data class LivePond(
     val ph: Double?,
     val tds: Double?,
     val temp: Double?,
+    val turbidity: Double?,
     val doLevel: Double?,
+    val nh4: Double?,
+    val no3: Double?,
+    val cod: Double?,
+    val nh4Label: String,
+    val no3Label: String,
+    val codLabel: String,
+    val lastUpdatedLabel: String,
     val alerts: List<ParamAlert>,
     val level: AlertLevel?
 ) {
@@ -87,40 +99,134 @@ data class LivePond(
 }
 
 fun fmtLive(v: Double?, decimals: Int = 1): String =
-    if (v == null) "-" else String.format(Locale.US, "%." + decimals + "f", v)
+    formatSensorMetric(v, decimals, "N/A")
 
-private fun JSONObject.nullableDouble(key: String): Double? {
-    if (!has(key) || isNull(key)) return null
-    val v = optDouble(key, Double.NaN)
-    return if (v.isNaN()) null else v
+private fun formatIsoToTime(rawDate: String): String {
+    if (rawDate.length < 19) return "-"
+    return try {
+        val inFmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val outFmt = SimpleDateFormat("HH:mm:ss", Locale("id", "ID"))
+        val parsed = inFmt.parse(rawDate.substring(0, 19))
+        if (parsed != null) outFmt.format(parsed) else "-"
+    } catch (_: Exception) {
+        "-"
+    }
 }
 
 suspend fun fetchLivePonds(): List<LivePond> {
-    val arr = SupabaseApi.getDevices()
+    val devicesArr = SupabaseApi.getDevices()
+    val logsArr = SupabaseApi.getLatestSensorLogs(limit = 50)
+
+    val latestByDevice = mutableMapOf<String, JSONObject>()
+    val latestByPond = mutableMapOf<Int, JSONObject>()
+    for (i in 0 until logsArr.length()) {
+        val logObj = logsArr.getJSONObject(i)
+        val devKey = logObj.optString("device_id", "").trim().uppercase(Locale.ROOT)
+        if (devKey.isNotEmpty() && !latestByDevice.containsKey(devKey)) {
+            latestByDevice[devKey] = logObj
+        }
+        val pondKey = logObj.optInt("pond_number", 0)
+        if (pondKey > 0 && !latestByPond.containsKey(pondKey)) {
+            latestByPond[pondKey] = logObj
+        }
+    }
+
     val out = mutableListOf<LivePond>()
-    for (i in 0 until arr.length()) {
-        val o = arr.getJSONObject(i)
-        val ph = o.nullableDouble("live_ph")
-        val tds = o.nullableDouble("live_tds")
-        val temp = o.nullableDouble("live_temp")
-        val doLevel = o.nullableDouble("live_do")
+    for (i in 0 until devicesArr.length()) {
+        val o = devicesArr.getJSONObject(i)
+        val devId = o.optString("id", "")
+        val pondNum = o.optInt("pond_number", 1)
+        val matchedLog = latestByDevice[devId.trim().uppercase(Locale.ROOT)] ?: latestByPond[pondNum]
+
+        val ph = matchedLog?.optNullableDoubleAny("ph_level", "ph", "live_ph")
+            ?: o.optNullableDoubleAny("live_ph", "ph_level")
+        val tds = matchedLog?.optNullableDoubleAny("tds_ppm", "tds", "live_tds")
+            ?: o.optNullableDoubleAny("live_tds", "tds_ppm")
+        val temp = matchedLog?.optNullableDoubleAny("temperature_c", "temperature", "temp", "live_temp")
+            ?: o.optNullableDoubleAny("live_temp", "temperature_c")
+        val turbidity = matchedLog?.optNullableDoubleAny("turbidity_ntu", "turbidity", "turb", "live_turb")
+            ?: o.optNullableDoubleAny("live_turb", "turbidity_ntu")
+        val doLevel = matchedLog?.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do")
+            ?: o.optNullableDoubleAny("live_do", "do_level", "dissolved_oxygen")
+        val nh4 = matchedLog?.optNullableDoubleAny("nh4", "nh4_mg_l", "amonia")
+        val no3 = matchedLog?.optNullableDoubleAny("no3", "no3_mg_l", "nitrat")
+        val cod = matchedLog?.optNullableDoubleAny("cod", "cod_mg_l")
+
+        val nh4Label = nh4?.let { formatSensorMetric(it, 2) }
+            ?: matchedLog?.optNullableStringAny("nh4")
+            ?: "N/A"
+        val no3Label = no3?.let { formatSensorMetric(it, 2) }
+            ?: matchedLog?.optNullableStringAny("no3")
+            ?: "N/A"
+        val codLabel = cod?.let { formatSensorMetric(it, 1) }
+            ?: matchedLog?.optNullableStringAny("cod")
+            ?: "N/A"
+
         val alerts = WaterQualityRules.evaluateAll(ph, tds, temp, doLevel)
+        val lastUpdated = formatIsoToTime(matchedLog?.optString("created_at", "") ?: "")
 
         out.add(
             LivePond(
-                deviceId = o.optString("id", ""),
+                deviceId = devId,
                 deviceName = o.optString("name", "Sipandu"),
-                pondNumber = o.optInt("pond_number", 1),
-                isConnected = o.optBoolean("is_connected", false),
+                pondNumber = pondNum,
+                isConnected = o.optBoolean("is_connected", false) || matchedLog != null,
                 ph = ph,
                 tds = tds,
                 temp = temp,
+                turbidity = turbidity,
                 doLevel = doLevel,
+                nh4 = nh4,
+                no3 = no3,
+                cod = cod,
+                nh4Label = nh4Label,
+                no3Label = no3Label,
+                codLabel = codLabel,
+                lastUpdatedLabel = lastUpdated,
                 alerts = alerts,
                 level = if (alerts.isEmpty()) null else WaterQualityRules.overallStatus(alerts)
             )
         )
     }
+
+    if (out.isEmpty() && logsArr.length() > 0) {
+        val logObj = logsArr.getJSONObject(0)
+        val ph = logObj.optNullableDoubleAny("ph_level", "ph", "live_ph")
+        val tds = logObj.optNullableDoubleAny("tds_ppm", "tds", "live_tds")
+        val temp = logObj.optNullableDoubleAny("temperature_c", "temperature", "temp", "live_temp")
+        val turbidity = logObj.optNullableDoubleAny("turbidity_ntu", "turbidity", "turb", "live_turb")
+        val doLevel = logObj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do")
+        val nh4 = logObj.optNullableDoubleAny("nh4", "nh4_mg_l", "amonia")
+        val no3 = logObj.optNullableDoubleAny("no3", "no3_mg_l", "nitrat")
+        val cod = logObj.optNullableDoubleAny("cod", "cod_mg_l")
+        val alerts = WaterQualityRules.evaluateAll(ph, tds, temp, doLevel)
+
+        out.add(
+            LivePond(
+                deviceId = logObj.optString("device_id", "SIPANDU_A"),
+                deviceName = "Sipandu A",
+                pondNumber = logObj.optInt("pond_number", 5),
+                isConnected = true,
+                ph = ph,
+                tds = tds,
+                temp = temp,
+                turbidity = turbidity,
+                doLevel = doLevel,
+                nh4 = nh4,
+                no3 = no3,
+                cod = cod,
+                nh4Label = nh4?.let { formatSensorMetric(it, 2) } ?: "N/A",
+                no3Label = no3?.let { formatSensorMetric(it, 2) } ?: "N/A",
+                codLabel = cod?.let { formatSensorMetric(it, 1) } ?: "N/A",
+                lastUpdatedLabel = formatIsoToTime(logObj.optString("created_at", "")),
+                alerts = alerts,
+                level = if (alerts.isEmpty()) null else WaterQualityRules.overallStatus(alerts)
+            )
+        )
+    }
+
     return out
 }
 
@@ -291,6 +397,135 @@ fun DashboardScreen(
                             color = Color(0xFF334155),
                             lineHeight = 17.sp
                         )
+                    }
+                }
+            }
+
+            // 0. Kartu Data Realtime Sensor (8 Parameter dari Supabase sensor_logs)
+            item {
+                val primaryLive = livePonds.firstOrNull {
+                    it.ph != null || it.tds != null || it.temp != null || it.turbidity != null || it.doLevel != null
+                } ?: livePonds.firstOrNull()
+
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Data Realtime Sensor",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            val subtitle = if (primaryLive != null) {
+                                "${primaryLive.deviceName.replace("Sipandu", "ALAT").uppercase()} - ${primaryLive.pondName.uppercase()} • Log ${primaryLive.lastUpdatedLabel}"
+                            } else {
+                                "Menunggu pembacaan dari Supabase sensor_logs..."
+                            }
+                            Text(
+                                text = subtitle,
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Card(
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "TDS",
+                                    value = formatSensorMetric(primaryLive?.tds, 0),
+                                    unit = "/ppm",
+                                    iconType = "tds"
+                                )
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "pH",
+                                    value = formatSensorMetric(primaryLive?.ph, 2),
+                                    unit = "/ph",
+                                    iconType = "ph"
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "Temperature",
+                                    value = formatSensorMetric(primaryLive?.temp, 1),
+                                    unit = "°C",
+                                    iconType = "temp"
+                                )
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "DO",
+                                    value = formatSensorMetric(primaryLive?.doLevel, 1),
+                                    unit = "mg/L",
+                                    iconType = "do"
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "Turbidity",
+                                    value = formatSensorMetric(primaryLive?.turbidity, 1),
+                                    unit = "NTU",
+                                    iconType = "turb"
+                                )
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "NH4+",
+                                    value = primaryLive?.nh4Label ?: "N/A",
+                                    unit = "mg/L",
+                                    iconType = "flask"
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "NO3-",
+                                    value = primaryLive?.no3Label ?: "N/A",
+                                    unit = "mg/L",
+                                    iconType = "bucket"
+                                )
+                                SensorMetricTile(
+                                    modifier = Modifier.weight(1f),
+                                    title = "COD",
+                                    value = primaryLive?.codLabel ?: "N/A",
+                                    unit = "mg/L",
+                                    iconType = "mesh"
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -560,7 +795,10 @@ fun DashboardScreen(
                                             " | DO " + fmtLive(p.doLevel, 1) +
                                             " | TDS " + fmtLive(p.tds, 0),
                                     paramLine2 = "Suhu " + fmtLive(p.temp, 1) +
-                                            " | COD - | NH4+ - | NO3- -",
+                                            " | Turb " + fmtLive(p.turbidity, 1) +
+                                            " | COD " + p.codLabel +
+                                            " | NH4+ " + p.nh4Label +
+                                            " | NO3- " + p.no3Label,
                                     reasonLine = p.reasonText
                                 )
                             }

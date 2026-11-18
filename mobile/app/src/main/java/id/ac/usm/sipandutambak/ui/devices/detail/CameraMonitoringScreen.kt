@@ -1,34 +1,38 @@
 package id.ac.usm.sipandutambak.ui.devices.detail
 
+import android.app.TimePickerDialog
+import android.content.Context
+import android.net.Uri
+import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -38,7 +42,189 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.ac.usm.sipandutambak.R
 import id.ac.usm.sipandutambak.util.CsvExportHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+
+private const val CAMERA_PREFS_NAME = "sipandu_camera_prefs"
+private const val KEY_STREAM_URL = "camera_stream_url"
+private const val KEY_RESOLUTION = "camera_resolution"
+private const val KEY_TARGET_FPS = "camera_target_fps"
+private const val KEY_SCALE_COVER = "camera_scale_cover"
+private const val KEY_NON_STOP_MODE = "camera_non_stop_mode"
+private const val KEY_SHOW_DETECTION_OVERLAY = "camera_show_detection_overlay"
+private const val KEY_AUTO_CAMERA_ENABLED = "camera_auto_enabled"
+private const val KEY_AUTO_SCHEDULES = "camera_auto_schedules"
+private const val DEFAULT_STREAM_URL = "http://192.168.100.41:5000/video_feed"
+private const val DEFAULT_SCHEDULES = "10:00:00,11:00:00,13:00:00,14:00:00,17:00:00"
+
+enum class CameraResolutionOption(
+    val id: String,
+    val label: String,
+    val badgeLabel: String,
+    val description: String
+) {
+    SD_480P("480p", "480p (640x480)", "SD 480p", "Direkomendasikan untuk inferensi YOLO paling lancar"),
+    HD_720P("720p", "720p (1280x720)", "HD 720p", "Kualitas tajam standar"),
+    FHD_1080P("1080p", "1080p (1920x1080)", "FHD 1080p", "Resolusi maksimal kamera");
+
+    companion object {
+        fun fromId(id: String?): CameraResolutionOption =
+            entries.firstOrNull { it.id == id } ?: HD_720P
+    }
+}
+
+enum class CameraFpsOption(
+    val id: String,
+    val label: String,
+    val badgeLabel: String
+) {
+    FPS_5("5", "5 FPS (Stabil AI)", "5 FPS"),
+    FPS_10("10", "10 FPS", "10 FPS"),
+    FPS_15("15", "15 FPS", "15 FPS"),
+    AUTO("auto", "Auto Jetson", "AUTO");
+
+    companion object {
+        fun fromId(id: String?): CameraFpsOption =
+            entries.firstOrNull { it.id == id } ?: FPS_5
+    }
+}
+
+private data class JetsonServerStatus(
+    val isChecking: Boolean = true,
+    val isOnline: Boolean = false,
+    val httpCode: Int? = null,
+    val message: String = "Memeriksa koneksi...",
+    val liveFps: Double? = null,
+    val fishCount: Int? = null
+)
+
+private fun extractHostPort(streamUrl: String): String {
+    return try {
+        val uri = Uri.parse(streamUrl.trim())
+        val host = uri.host
+        val port = uri.port
+        when {
+            !host.isNullOrBlank() && port > 0 -> "$host:$port"
+            !host.isNullOrBlank() -> host
+            else -> streamUrl.trim()
+        }
+    } catch (_: Exception) {
+        streamUrl.trim()
+    }
+}
+
+private fun extractBaseUrl(streamUrl: String): String? {
+    return try {
+        val uri = Uri.parse(streamUrl.trim())
+        val scheme = uri.scheme ?: return null
+        val host = uri.host ?: return null
+        if (uri.port > 0) "$scheme://$host:${uri.port}" else "$scheme://$host"
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private suspend fun checkJetsonConnection(streamUrl: String): JetsonServerStatus = withContext(Dispatchers.IO) {
+    val target = streamUrl.trim()
+    if (target.isBlank()) {
+        return@withContext JetsonServerStatus(
+            isChecking = false,
+            isOnline = false,
+            message = "URL stream kosong"
+        )
+    }
+
+    var code: Int? = null
+    var errorMsg: String? = null
+    var conn: HttpURLConnection? = null
+    try {
+        conn = (URL(target).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 2500
+            readTimeout = 2500
+            instanceFollowRedirects = true
+        }
+        code = conn.responseCode
+    } catch (e: Exception) {
+        errorMsg = e.localizedMessage ?: "Timeout / tidak terjangkau"
+    } finally {
+        try {
+            conn?.disconnect()
+        } catch (_: Exception) {
+        }
+    }
+
+    val isOnline = code != null && code in 200..399
+    var liveFps: Double? = null
+    var fishCount: Int? = null
+
+    val baseUrl = extractBaseUrl(target)
+    if (isOnline && baseUrl != null) {
+        for (path in listOf("/api/status", "/status")) {
+            var statusConn: HttpURLConnection? = null
+            try {
+                statusConn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 1500
+                    readTimeout = 1500
+                }
+                if (statusConn.responseCode in 200..299) {
+                    val body = statusConn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(body)
+                    val streamObj = json.optJSONObject("stream")
+                    if (streamObj != null && streamObj.has("fps")) {
+                        liveFps = streamObj.optDouble("fps")
+                    } else if (json.has("fps")) {
+                        liveFps = json.optDouble("fps")
+                    }
+                    if (json.has("fish_count")) {
+                        fishCount = json.optInt("fish_count")
+                    } else if (json.has("total_ikan")) {
+                        fishCount = json.optInt("total_ikan")
+                    }
+                    break
+                }
+            } catch (_: Exception) {
+            } finally {
+                try {
+                    statusConn?.disconnect()
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    JetsonServerStatus(
+        isChecking = false,
+        isOnline = isOnline,
+        httpCode = code,
+        message = when {
+            isOnline -> "Terhubung (HTTP $code)"
+            code != null -> "Server merespons HTTP $code"
+            else -> "Gagal terhubung (${errorMsg ?: "Offline"})"
+        },
+        liveFps = liveFps?.takeIf { !it.isNaN() },
+        fishCount = fishCount
+    )
+}
+
+private fun escapeHtmlAttribute(value: String): String = value
+    .replace("&", "&amp;")
+    .replace("\"", "&quot;")
+    .replace("'", "&#39;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+
+private fun buildMjpegStreamHtml(streamUrl: String, useCoverScale: Boolean): String {
+    val safeUrl = escapeHtmlAttribute(streamUrl.trim())
+    val objectFit = if (useCoverScale) "cover" else "contain"
+    return "<html><body style='margin:0;padding:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;'><img src='$safeUrl' style='width:100%;height:100%;object-fit:$objectFit;'/></body></html>"
+}
 
 enum class CameraState {
     STANDBY,
@@ -62,34 +248,104 @@ fun CameraMonitoringScreen(
     onBackClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val cameraPrefs = remember(context) {
+        context.getSharedPreferences(CAMERA_PREFS_NAME, Context.MODE_PRIVATE)
+    }
     var cameraState by remember { mutableStateOf(CameraState.STANDBY) }
     var recordingSecondsLeft by remember { mutableStateOf(900) }
+    var elapsedLiveSeconds by remember { mutableStateOf(0) }
     var cooldownSecondsLeft by remember { mutableStateOf(60) }
     var remainingQuota by remember { mutableStateOf(5) }
-    var isAutoCameraEnabled by remember { mutableStateOf(true) }
-    var jetsonStreamUrl by remember { mutableStateOf("http://192.168.1.101:8080/stream") }
-    var useLiveStream by remember { mutableStateOf(true) }
+    var isAutoCameraEnabled by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_AUTO_CAMERA_ENABLED, true))
+    }
+    var autoSchedules by remember {
+        mutableStateOf(
+            (cameraPrefs.getString(KEY_AUTO_SCHEDULES, DEFAULT_SCHEDULES) ?: DEFAULT_SCHEDULES)
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .ifEmpty { DEFAULT_SCHEDULES.split(",") }
+        )
+    }
+    var jetsonStreamUrl by remember {
+        mutableStateOf(
+            cameraPrefs.getString(KEY_STREAM_URL, DEFAULT_STREAM_URL)
+                ?.takeIf { it.isNotBlank() }
+                ?: DEFAULT_STREAM_URL
+        )
+    }
+    var selectedResolution by remember {
+        mutableStateOf(
+            CameraResolutionOption.fromId(
+                cameraPrefs.getString(KEY_RESOLUTION, CameraResolutionOption.HD_720P.id)
+            )
+        )
+    }
+    var selectedFps by remember {
+        mutableStateOf(
+            CameraFpsOption.fromId(
+                cameraPrefs.getString(KEY_TARGET_FPS, CameraFpsOption.FPS_5.id)
+            )
+        )
+    }
+    var useCoverScale by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_SCALE_COVER, true))
+    }
+    var isNonStopMode by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_NON_STOP_MODE, true))
+    }
+    var showDetectionOverlay by remember {
+        mutableStateOf(cameraPrefs.getBoolean(KEY_SHOW_DETECTION_OVERLAY, true))
+    }
 
+    var serverStatus by remember { mutableStateOf(JetsonServerStatus()) }
+    var statusCheckTrigger by remember { mutableStateOf(0) }
     var showConfigModal by remember { mutableStateOf(false) }
 
-    LaunchedEffect(cameraState) {
+    BackHandler(enabled = !showConfigModal) {
+        onBackClick()
+    }
+
+    LaunchedEffect(jetsonStreamUrl, statusCheckTrigger, cameraState) {
+        serverStatus = serverStatus.copy(isChecking = true)
+        serverStatus = checkJetsonConnection(jetsonStreamUrl)
+        while (cameraState == CameraState.STANDBY) {
+            delay(10000)
+            serverStatus = checkJetsonConnection(jetsonStreamUrl)
+        }
+    }
+
+    LaunchedEffect(cameraState, isNonStopMode) {
         if (cameraState == CameraState.RECORDING) {
-            recordingSecondsLeft = 900
-            while (recordingSecondsLeft > 0 && cameraState == CameraState.RECORDING) {
-                delay(1000)
-                recordingSecondsLeft--
-            }
-            if (cameraState == CameraState.RECORDING) {
-                cameraState = CameraState.COOLDOWN
+            if (isNonStopMode) {
+                elapsedLiveSeconds = 0
+                while (cameraState == CameraState.RECORDING && isNonStopMode) {
+                    delay(1000)
+                    elapsedLiveSeconds++
+                }
+            } else {
+                recordingSecondsLeft = 900
+                while (recordingSecondsLeft > 0 && cameraState == CameraState.RECORDING && !isNonStopMode) {
+                    delay(1000)
+                    recordingSecondsLeft--
+                }
+                if (cameraState == CameraState.RECORDING && !isNonStopMode) {
+                    cameraState = CameraState.COOLDOWN
+                }
             }
         } else if (cameraState == CameraState.COOLDOWN) {
-            cooldownSecondsLeft = 60
-            while (cooldownSecondsLeft > 0 && cameraState == CameraState.COOLDOWN) {
-                delay(1000)
-                cooldownSecondsLeft--
-            }
-            if (cameraState == CameraState.COOLDOWN) {
+            if (isNonStopMode) {
                 cameraState = CameraState.STANDBY
+            } else {
+                cooldownSecondsLeft = 60
+                while (cooldownSecondsLeft > 0 && cameraState == CameraState.COOLDOWN) {
+                    delay(1000)
+                    cooldownSecondsLeft--
+                }
+                if (cameraState == CameraState.COOLDOWN) {
+                    cameraState = CameraState.STANDBY
+                }
             }
         }
     }
@@ -113,76 +369,41 @@ fun CameraMonitoringScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 120.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Surface(
-                            onClick = onBackClick,
-                            shape = CircleShape,
-                            color = Color.White,
-                            shadowElevation = 2.dp,
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.ArrowBack,
-                                    contentDescription = "Kembali",
-                                    tint = Color(0xFF0F172A),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        Column {
+                    Column {
+                        Text(
+                            text = "SIPANDU",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF453636),
+                            letterSpacing = 0.5.sp,
+                            lineHeight = 22.sp
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.famicons_fish),
+                                contentDescription = "Logo Ikan",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(width = 36.dp, height = 24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "SIPANDU",
-                                fontSize = 20.sp,
+                                text = "TAMBAK",
+                                fontSize = 22.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFF453636),
-                                lineHeight = 20.sp
+                                letterSpacing = 0.5.sp,
+                                lineHeight = 22.sp
                             )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.famicons_fish),
-                                    contentDescription = "Logo Ikan",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.size(width = 30.dp, height = 20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "TAMBAK",
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF453636),
-                                    lineHeight = 20.sp
-                                )
-                            }
                         }
-                    }
-
-                    Surface(
-                        onClick = onBackClick,
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.White,
-                        border = BorderStroke(0.8.dp, Color(0xFFCBD5E1))
-                    ) {
-                        Text(
-                            text = "Tutup",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0284C7),
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
                     }
                 }
             }
@@ -261,6 +482,9 @@ fun CameraMonitoringScreen(
             }
 
             item {
+                val streamSignature = "$jetsonStreamUrl|$useCoverScale"
+                val fpsBadgeText = serverStatus.liveFps?.let { "${it} FPS" } ?: selectedFps.badgeLabel
+
                 Card(
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
@@ -271,48 +495,62 @@ fun CameraMonitoringScreen(
                         .height(230.dp)
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        if (useLiveStream && jetsonStreamUrl.isNotBlank() && cameraState == CameraState.RECORDING) {
+                        if (jetsonStreamUrl.isNotBlank() && cameraState == CameraState.RECORDING) {
                             AndroidView(
                                 factory = { ctx ->
                                     WebView(ctx).apply {
+                                        layoutParams = ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            ViewGroup.LayoutParams.MATCH_PARENT
+                                        )
+                                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
                                         settings.javaScriptEnabled = true
                                         settings.loadWithOverviewMode = true
                                         settings.useWideViewPort = true
-                                        setBackgroundColor(android.graphics.Color.BLACK)
-                                        val html = """
-                                            <!DOCTYPE html>
-                                            <html>
-                                            <head><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"></head>
-                                            <body style="margin:0;padding:0;background:#0F172A;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;">
-                                                <img src="$jetsonStreamUrl" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';document.getElementById('err').style.display='block';"/>
-                                                <div id="err" style="display:none;color:#EF4444;font-family:sans-serif;font-size:12px;text-align:center;padding:12px;">
-                                                    Gagal memuat stream kamera.<br>Periksa URL IP/Tunnel Jetson di pengaturan.
-                                                </div>
-                                            </body>
-                                            </html>
-                                        """.trimIndent()
-                                        loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+                                        settings.domStorageEnabled = true
+                                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                        webViewClient = WebViewClient()
+                                        webChromeClient = WebChromeClient()
+                                        tag = streamSignature
+                                        loadDataWithBaseURL(
+                                            null,
+                                            buildMjpegStreamHtml(jetsonStreamUrl, useCoverScale),
+                                            "text/html",
+                                            "UTF-8",
+                                            null
+                                        )
                                     }
                                 },
                                 update = { webView ->
-                                    val html = """
-                                        <!DOCTYPE html>
-                                        <html>
-                                        <head><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"></head>
-                                        <body style="margin:0;padding:0;background:#0F172A;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;">
-                                            <img src="$jetsonStreamUrl" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';document.getElementById('err').style.display='block';"/>
-                                            <div id="err" style="display:none;color:#EF4444;font-family:sans-serif;font-size:12px;text-align:center;padding:12px;">
-                                                Gagal memuat stream kamera.<br>Periksa URL IP/Tunnel Jetson di pengaturan.
-                                            </div>
-                                        </body>
-                                        </html>
-                                    """.trimIndent()
-                                    webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+                                    if (webView.tag != streamSignature) {
+                                        webView.tag = streamSignature
+                                        webView.loadDataWithBaseURL(
+                                            null,
+                                            buildMjpegStreamHtml(jetsonStreamUrl, useCoverScale),
+                                            "text/html",
+                                            "UTF-8",
+                                            null
+                                        )
+                                    }
+                                },
+                                onRelease = { webView ->
+                                    webView.stopLoading()
+                                    webView.loadUrl("about:blank")
+                                    webView.destroy()
                                 },
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
-                            LiveCameraWaterCanvas(modifier = Modifier.fillMaxSize())
+                            StandbyCameraStatusView(
+                                streamUrl = jetsonStreamUrl,
+                                serverStatus = serverStatus,
+                                resolution = selectedResolution,
+                                targetFps = selectedFps,
+                                isCooldown = cameraState == CameraState.COOLDOWN,
+                                onRefreshStatus = { statusCheckTrigger++ },
+                                modifier = Modifier.fillMaxSize()
+                            )
                         }
 
                         Row(
@@ -333,11 +571,16 @@ fun CameraMonitoringScreen(
                                     Box(
                                         modifier = Modifier
                                             .size(6.dp)
-                                            .background(Color(0xFFEF4444), CircleShape)
+                                            .background(
+                                                if (cameraState == CameraState.RECORDING) Color.White
+                                                else if (serverStatus.isOnline) Color(0xFF22C55E)
+                                                else Color(0xFFEF4444),
+                                                CircleShape
+                                            )
                                     )
                                     Spacer(modifier = Modifier.width(5.dp))
                                     Text(
-                                        text = if (cameraState == CameraState.RECORDING) "LIVE REC" else "LIVE",
+                                        text = if (cameraState == CameraState.RECORDING) "LIVE REC" else "STANDBY",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = Color.White
@@ -353,10 +596,20 @@ fun CameraMonitoringScreen(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(modifier = Modifier.size(5.dp).background(Color(0xFFDC2626), CircleShape))
+                                    val statusDotColor = when {
+                                        serverStatus.isChecking -> Color(0xFFF59E0B)
+                                        serverStatus.isOnline -> Color(0xFF16A34A)
+                                        else -> Color(0xFFDC2626)
+                                    }
+                                    val statusLabel = when {
+                                        serverStatus.isChecking -> "CEK JETSON"
+                                        serverStatus.isOnline -> "JETSON ONLINE"
+                                        else -> "JETSON OFFLINE"
+                                    }
+                                    Box(modifier = Modifier.size(6.dp).background(statusDotColor, CircleShape))
                                     Spacer(modifier = Modifier.width(5.dp))
                                     Text(
-                                        text = "LIVE KAMERA | 1080p FHD",
+                                        text = "$statusLabel | ${selectedResolution.badgeLabel}",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF0F172A)
@@ -373,17 +626,50 @@ fun CameraMonitoringScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xCC000000)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "HD 1080p",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xCC000000)
+                                ) {
+                                    Text(
+                                        text = "${selectedResolution.badgeLabel} • $fpsBadgeText",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                if (serverStatus.fishCount != null) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xCC0284C7)
+                                    ) {
+                                        Text(
+                                            text = "Ikan: ${serverStatus.fishCount}",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                } else if (showDetectionOverlay) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xCC0F172A)
+                                    ) {
+                                        Text(
+                                            text = "AI Overlay",
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF38BDF8),
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
                             }
 
                             Surface(
@@ -411,8 +697,10 @@ fun CameraMonitoringScreen(
                     CameraState.STANDBY -> {
                         Surface(
                             onClick = {
-                                if (remainingQuota > 0) {
-                                    remainingQuota--
+                                if (isNonStopMode || remainingQuota > 0) {
+                                    if (!isNonStopMode) {
+                                        remainingQuota--
+                                    }
                                     cameraState = CameraState.RECORDING
                                 } else {
                                     Toast.makeText(context, "Batas kuota harian kamera telah habis", Toast.LENGTH_SHORT).show()
@@ -436,7 +724,9 @@ fun CameraMonitoringScreen(
                     }
                     CameraState.RECORDING -> {
                         Surface(
-                            onClick = { cameraState = CameraState.COOLDOWN },
+                            onClick = {
+                                cameraState = if (isNonStopMode) CameraState.STANDBY else CameraState.COOLDOWN
+                            },
                             shape = RoundedCornerShape(10.dp),
                             color = Color(0xFFDC2626),
                             modifier = Modifier
@@ -445,7 +735,7 @@ fun CameraMonitoringScreen(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = "Kamera Sedang Merekam",
+                                    text = if (isNonStopMode) "Matikan Live Kamera" else "Kamera Sedang Merekam",
                                     fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -479,68 +769,106 @@ fun CameraMonitoringScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    val statusLabel = when (cameraState) {
-                        CameraState.RECORDING -> "Kamera akan mati dalam"
-                        CameraState.COOLDOWN -> "Kamera bisa digunakan kembali dalam"
-                        CameraState.STANDBY -> "Kamera siap dinyalakan"
-                    }
-
-                    val totalSecs = when (cameraState) {
-                        CameraState.RECORDING -> recordingSecondsLeft
-                        CameraState.COOLDOWN -> cooldownSecondsLeft
-                        CameraState.STANDBY -> 0
-                    }
-
-                    val hours = totalSecs / 3600
-                    val minutes = (totalSecs % 3600) / 60
-                    val seconds = totalSecs % 60
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = statusLabel,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF334155)
-                        )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            DigitBox(hours / 10)
-                            DigitBox(hours % 10)
-                            Text(":", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            DigitBox(minutes / 10)
-                            DigitBox(minutes % 10)
-                            Text(":", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            DigitBox(seconds / 10)
-                            DigitBox(seconds % 10)
+                    if (isNonStopMode) {
+                        val statusLabel = when (cameraState) {
+                            CameraState.RECORDING -> "Durasi live streaming aktif"
+                            else -> "Mode Monitoring Non-Stop (Tanpa Batas)"
                         }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Kesempatan menggunakan kamera",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF334155)
-                        )
+                        val totalSecs = if (cameraState == CameraState.RECORDING) elapsedLiveSeconds else 0
+                        val hours = totalSecs / 3600
+                        val minutes = (totalSecs % 3600) / 60
+                        val seconds = totalSecs % 60
 
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            DigitBox(remainingQuota)
-                            Text("/", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            DigitBox(5)
+                            Text(
+                                text = statusLabel,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF334155)
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                DigitBox(hours / 10)
+                                DigitBox(hours % 10)
+                                Text(":", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                DigitBox(minutes / 10)
+                                DigitBox(minutes % 10)
+                                Text(":", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                DigitBox(seconds / 10)
+                                DigitBox(seconds % 10)
+                            }
+                        }
+                    } else {
+                        val statusLabel = when (cameraState) {
+                            CameraState.RECORDING -> "Kamera akan mati dalam"
+                            CameraState.COOLDOWN -> "Kamera bisa digunakan kembali dalam"
+                            CameraState.STANDBY -> "Kamera siap dinyalakan"
+                        }
+
+                        val totalSecs = when (cameraState) {
+                            CameraState.RECORDING -> recordingSecondsLeft
+                            CameraState.COOLDOWN -> cooldownSecondsLeft
+                            CameraState.STANDBY -> 0
+                        }
+
+                        val hours = totalSecs / 3600
+                        val minutes = (totalSecs % 3600) / 60
+                        val seconds = totalSecs % 60
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = statusLabel,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF334155)
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                DigitBox(hours / 10)
+                                DigitBox(hours % 10)
+                                Text(":", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                DigitBox(minutes / 10)
+                                DigitBox(minutes % 10)
+                                Text(":", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                DigitBox(seconds / 10)
+                                DigitBox(seconds % 10)
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Kesempatan menggunakan kamera",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF334155)
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                DigitBox(remainingQuota)
+                                Text("/", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                DigitBox(5)
+                            }
                         }
                     }
                 }
@@ -608,9 +936,29 @@ fun CameraMonitoringScreen(
                                 textAlign = TextAlign.Center
                             )
 
-                            val schedules = listOf("10:00:00", "11:00:00", "13:00:00", "14:00:00", "17:00:00")
-                            schedules.forEach { time ->
+                            autoSchedules.forEachIndexed { index, time ->
                                 Surface(
+                                    onClick = {
+                                        val parts = time.split(":")
+                                        val initHour = parts.getOrNull(0)?.toIntOrNull() ?: 10
+                                        val initMin = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                                        TimePickerDialog(
+                                            context,
+                                            { _, hourOfDay, minute ->
+                                                val updated = String.format("%02d:%02d:00", hourOfDay, minute)
+                                                val nextList = autoSchedules.toMutableList().apply {
+                                                    this[index] = updated
+                                                }
+                                                autoSchedules = nextList
+                                                cameraPrefs.edit()
+                                                    .putString(KEY_AUTO_SCHEDULES, nextList.joinToString(","))
+                                                    .apply()
+                                            },
+                                            initHour,
+                                            initMin,
+                                            true
+                                        ).show()
+                                    },
                                     shape = RoundedCornerShape(10.dp),
                                     color = Color.White,
                                     border = BorderStroke(0.8.dp, Color(0xFFCBD5E1)),
@@ -656,7 +1004,12 @@ fun CameraMonitoringScreen(
                                 )
                                 Switch(
                                     checked = isAutoCameraEnabled,
-                                    onCheckedChange = { isAutoCameraEnabled = it },
+                                    onCheckedChange = { enabled ->
+                                        isAutoCameraEnabled = enabled
+                                        cameraPrefs.edit()
+                                            .putBoolean(KEY_AUTO_CAMERA_ENABLED, enabled)
+                                            .apply()
+                                    },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = Color.White,
                                         checkedTrackColor = Color(0xFF38BDF8)
@@ -788,11 +1141,33 @@ fun CameraMonitoringScreen(
         if (showConfigModal) {
             CameraConfigBottomSheet(
                 currentUrl = jetsonStreamUrl,
-                isLiveEnabled = useLiveStream,
+                currentResolution = selectedResolution,
+                currentFps = selectedFps,
+                currentUseCoverScale = useCoverScale,
+                currentNonStopMode = isNonStopMode,
+                currentShowOverlay = showDetectionOverlay,
+                currentAutoCameraEnabled = isAutoCameraEnabled,
+                currentSchedules = autoSchedules,
                 onDismiss = { showConfigModal = false },
-                onSave = { newUrl, liveEnabled ->
-                    jetsonStreamUrl = newUrl
-                    useLiveStream = liveEnabled
+                onSave = { newUrl, res, fps, coverScale, nonStop, overlayEnabled, autoEnabled ->
+                    val sanitizedUrl = newUrl.trim().ifBlank { DEFAULT_STREAM_URL }
+                    cameraPrefs.edit()
+                        .putString(KEY_STREAM_URL, sanitizedUrl)
+                        .putString(KEY_RESOLUTION, res.id)
+                        .putString(KEY_TARGET_FPS, fps.id)
+                        .putBoolean(KEY_SCALE_COVER, coverScale)
+                        .putBoolean(KEY_NON_STOP_MODE, nonStop)
+                        .putBoolean(KEY_SHOW_DETECTION_OVERLAY, overlayEnabled)
+                        .putBoolean(KEY_AUTO_CAMERA_ENABLED, autoEnabled)
+                        .apply()
+                    jetsonStreamUrl = sanitizedUrl
+                    selectedResolution = res
+                    selectedFps = fps
+                    useCoverScale = coverScale
+                    isNonStopMode = nonStop
+                    showDetectionOverlay = overlayEnabled
+                    isAutoCameraEnabled = autoEnabled
+                    statusCheckTrigger++
                     showConfigModal = false
                     Toast.makeText(context, "Konfigurasi Kamera Berhasil Disimpan", Toast.LENGTH_SHORT).show()
                 }
@@ -823,20 +1198,37 @@ private fun DigitBox(digit: Int) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CameraConfigBottomSheet(
-    currentUrl: String = "http://192.168.1.101:8080/stream",
-    isLiveEnabled: Boolean = true,
+    currentUrl: String = DEFAULT_STREAM_URL,
+    currentResolution: CameraResolutionOption = CameraResolutionOption.HD_720P,
+    currentFps: CameraFpsOption = CameraFpsOption.FPS_5,
+    currentUseCoverScale: Boolean = true,
+    currentNonStopMode: Boolean = true,
+    currentShowOverlay: Boolean = true,
+    currentAutoCameraEnabled: Boolean = true,
+    currentSchedules: List<String> = emptyList(),
     onDismiss: () -> Unit,
-    onSave: (newUrl: String, liveEnabled: Boolean) -> Unit
+    onSave: (
+        newUrl: String,
+        resolution: CameraResolutionOption,
+        fps: CameraFpsOption,
+        useCoverScale: Boolean,
+        nonStopMode: Boolean,
+        showOverlay: Boolean,
+        autoCameraEnabled: Boolean
+    ) -> Unit
 ) {
-    var streamUrlInput by remember { mutableStateOf(currentUrl) }
-    var liveStreamToggle by remember { mutableStateOf(isLiveEnabled) }
+    val coroutineScope = rememberCoroutineScope()
+    var streamUrlInput by remember(currentUrl) { mutableStateOf(currentUrl) }
+    var selectedResolution by remember(currentResolution) { mutableStateOf(currentResolution) }
+    var selectedFps by remember(currentFps) { mutableStateOf(currentFps) }
+    var coverScaleToggle by remember(currentUseCoverScale) { mutableStateOf(currentUseCoverScale) }
+    var nonStopToggle by remember(currentNonStopMode) { mutableStateOf(currentNonStopMode) }
+    var overlayToggle by remember(currentShowOverlay) { mutableStateOf(currentShowOverlay) }
+    var autoCameraToggle by remember(currentAutoCameraEnabled) { mutableStateOf(currentAutoCameraEnabled) }
 
-    var autoExposure by remember { mutableStateOf(false) }
-    var lockAe by remember { mutableStateOf(true) }
-    var wdr by remember { mutableStateOf(true) }
-
-    var selectedResolution by remember { mutableStateOf("1280 × 720 (HD)") }
-    var selectedFps by remember { mutableStateOf("30 FPS") }
+    var resolutionExpanded by remember { mutableStateOf(false) }
+    var fpsExpanded by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<JetsonServerStatus?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -846,18 +1238,19 @@ private fun CameraConfigBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 10.dp)
                 .padding(bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = "Edit Konfigurasi Kamera",
+                text = "Setting Kamera Jetson Nano",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF0F172A)
             )
 
-            // URL Streaming Jetson Nano
+            // 1. Alamat Server Stream Jetson + Tes Koneksi
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
@@ -869,34 +1262,98 @@ private fun CameraConfigBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "🌐 Sumber URL Stream Jetson Nano",
+                        text = "1. Alamat Server Stream Jetson (URL / IP)",
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0284C7)
                     )
                     Text(
-                        text = "Masukkan IP lokal (misal: http://192.168.1.101:8080/stream) atau public domain Cloudflare Tunnel (https://...trycloudflare.com/stream)",
+                        text = "Default: $DEFAULT_STREAM_URL",
                         fontSize = 11.sp,
                         color = Color(0xFF64748B)
                     )
 
                     OutlinedTextField(
                         value = streamUrlInput,
-                        onValueChange = { streamUrlInput = it },
+                        onValueChange = {
+                            streamUrlInput = it
+                            testResult = null
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        placeholder = { Text("http://192.168.1.101:8080/stream", fontSize = 12.sp) }
+                        placeholder = { Text(DEFAULT_STREAM_URL, fontSize = 12.sp) }
                     )
 
-                    ConfigToggleItem(
-                        title = "Aktifkan Live Stream Video Asli",
-                        description = "Jika dimatikan, layar kamera akan beralih ke animasi canvas simulasi.",
-                        checked = liveStreamToggle,
-                        onCheckedChange = { liveStreamToggle = it }
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                val targetUrl = streamUrlInput.trim().ifBlank { DEFAULT_STREAM_URL }
+                                testResult = JetsonServerStatus(isChecking = true, message = "Menguji koneksi...")
+                                coroutineScope.launch {
+                                    testResult = checkJetsonConnection(targetUrl)
+                                }
+                            },
+                            enabled = testResult?.isChecking != true,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0369A1)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (testResult?.isChecking == true) "Menguji..." else "Tes Koneksi",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        TextButton(
+                            onClick = {
+                                streamUrlInput = DEFAULT_STREAM_URL
+                                testResult = null
+                            }
+                        ) {
+                            Text("Reset Default", fontSize = 11.5.sp, color = Color(0xFF475569))
+                        }
+                    }
+
+                    testResult?.let { result ->
+                        val bg = when {
+                            result.isChecking -> Color(0xFFFEF3C7)
+                            result.isOnline -> Color(0xFFDCFCE7)
+                            else -> Color(0xFFFEE2E2)
+                        }
+                        val fg = when {
+                            result.isChecking -> Color(0xFF92400E)
+                            result.isOnline -> Color(0xFF166534)
+                            else -> Color(0xFF991B1B)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = bg,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = result.message,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = fg,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
                 }
             }
 
+            // 2. Pilihan Resolusi & Target FPS Rexus SW-10
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -908,35 +1365,126 @@ private fun CameraConfigBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "☼ 1. Pencahayaan",
+                        text = "2. Resolusi & Target FPS (Rexus SW-10)",
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0284C7)
                     )
 
+                    Column {
+                        Text(
+                            "Resolusi Stream Jetson",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                onClick = { resolutionExpanded = true },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                                color = Color(0xFFF8FAFC),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(42.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(selectedResolution.label, fontSize = 12.sp, color = Color(0xFF1E293B))
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color(0xFF0284C7))
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = resolutionExpanded,
+                                onDismissRequest = { resolutionExpanded = false }
+                            ) {
+                                CameraResolutionOption.entries.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(option.label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                                Text(option.description, fontSize = 10.5.sp, color = Color(0xFF64748B))
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedResolution = option
+                                            resolutionExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Column {
+                        Text(
+                            "Target Frame Rate (FPS)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                onClick = { fpsExpanded = true },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                                color = Color(0xFFF8FAFC),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(42.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(selectedFps.label, fontSize = 12.sp, color = Color(0xFF1E293B))
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color(0xFF0284C7))
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = fpsExpanded,
+                                onDismissRequest = { fpsExpanded = false }
+                            ) {
+                                CameraFpsOption.entries.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option.label, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold) },
+                                        onClick = {
+                                            selectedFps = option
+                                            fpsExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     ConfigToggleItem(
-                        title = "Auto-Exposure (AE)",
-                        description = "Biarkan menyala jika lingkungan cahaya berubah-ubah, misalnya di luar ruangan atau dekat jendela.",
-                        checked = autoExposure,
-                        onCheckedChange = { autoExposure = it }
+                        title = "Skala Penuh Kotak Video (Object-Fit Cover)",
+                        description = "Aktif: penuhi bingkai (cover). Nonaktif: tampilkan seluruh frame utuh (contain).",
+                        checked = coverScaleToggle,
+                        onCheckedChange = { coverScaleToggle = it }
                     )
 
                     ConfigToggleItem(
-                        title = "Kunci AE",
-                        description = "Gunakan jika pencahayaan lingkungan stabil (ruangan/indoor).",
-                        checked = lockAe,
-                        onCheckedChange = { lockAe = it }
-                    )
-
-                    ConfigToggleItem(
-                        title = "WDR (Wide Dynamic Range)",
-                        description = "Aktifkan jika objek sering membelakangi sumber cahaya (silau/backlight)",
-                        checked = wdr,
-                        onCheckedChange = { wdr = it }
+                        title = "Tampilkan Overlay Deteksi AI",
+                        description = "Tampilkan indikator overlay deteksi objek ikan & metadata di layar video.",
+                        checked = overlayToggle,
+                        onCheckedChange = { overlayToggle = it }
                     )
                 }
             }
 
+            // 3. Mode Operasional & Jadwal Otomatis
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -948,77 +1496,66 @@ private fun CameraConfigBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "# 2. Resolusi dan Frame Rate",
+                        text = "3. Mode Operasional & Jadwal Otomatis",
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0284C7)
                     )
 
-                    Column {
-                        Text("Resolusi Output Kamera", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                            color = Color(0xFFF8FAFC),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(40.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(selectedResolution, fontSize = 12.sp, color = Color(0xFF1E293B))
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color(0xFF0284C7))
-                            }
-                        }
-                    }
+                    ConfigToggleItem(
+                        title = "Mode Monitoring Non-Stop (Tanpa Batas Waktu & Kuota)",
+                        description = "Sembunyikan batas kuota 5/5 & timer mundur 15 menit agar kamera dapat menyala terus.",
+                        checked = nonStopToggle,
+                        onCheckedChange = { nonStopToggle = it }
+                    )
 
-                    Column {
-                        Text("Frame Rate (FPS)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                            color = Color(0xFFF8FAFC),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(40.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(selectedFps, fontSize = 12.sp, color = Color(0xFF1E293B))
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color(0xFF0284C7))
-                            }
-                        }
-                    }
+                    ConfigToggleItem(
+                        title = "Aktifkan Jadwal Kamera Otomatis",
+                        description = if (currentSchedules.isNotEmpty()) {
+                            "Jadwal aktif: ${currentSchedules.joinToString(", ") { it.take(5) }} (ubah jam di kartu jadwal)"
+                        } else {
+                            "Hidupkan kamera otomatis sesuai jadwal pemantauan kolam."
+                        },
+                        checked = autoCameraToggle,
+                        onCheckedChange = { autoCameraToggle = it }
+                    )
                 }
             }
 
-            Surface(
-                onClick = { onSave(streamUrlInput, liveStreamToggle) },
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF0284C7),
-                modifier = Modifier
-                    .align(Alignment.End)
-                    .width(130.dp)
-                    .height(42.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                TextButton(onClick = onDismiss) {
+                    Text("Batal", fontSize = 13.sp, color = Color(0xFF64748B))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    onClick = {
+                        onSave(
+                            streamUrlInput,
+                            selectedResolution,
+                            selectedFps,
+                            coverScaleToggle,
+                            nonStopToggle,
+                            overlayToggle,
+                            autoCameraToggle
+                        )
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF0284C7),
+                    modifier = Modifier
+                        .width(130.dp)
+                        .height(42.dp)
                 ) {
-                    Text("Simpan", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Simpan", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
         }
@@ -1063,48 +1600,89 @@ private fun ConfigToggleItem(
 }
 
 @Composable
-private fun LiveCameraWaterCanvas(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
+private fun StandbyCameraStatusView(
+    streamUrl: String,
+    serverStatus: JetsonServerStatus,
+    resolution: CameraResolutionOption,
+    targetFps: CameraFpsOption,
+    isCooldown: Boolean,
+    onRefreshStatus: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val hostPort = remember(streamUrl) { extractHostPort(streamUrl) }
+    val statusTitle = if (isCooldown) "Kamera Jeda (Cooldown)" else "Kamera Standby"
+    val statusBadgeColor = when {
+        serverStatus.isChecking -> Color(0xFFF59E0B)
+        serverStatus.isOnline -> Color(0xFF22C55E)
+        else -> Color(0xFFEF4444)
+    }
+    val statusText = when {
+        serverStatus.isChecking -> "Memeriksa server Jetson..."
+        serverStatus.isOnline -> "Server Jetson Online"
+        else -> "Server Jetson Offline"
+    }
 
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(Color(0xFF0E4B5B), Color(0xFF134E4A), Color(0xFF064E3B))
+    Box(
+        modifier = modifier.background(Color(0xFF0F172A)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = statusTitle,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White
             )
-        )
 
-        for (i in 1..4) {
-            val yOffset = h * (i * 0.22f)
-            val path = Path().apply {
-                moveTo(0f, yOffset)
-                cubicTo(w * 0.25f, yOffset - 12f, w * 0.75f, yOffset + 12f, w, yOffset)
+            Surface(
+                onClick = onRefreshStatus,
+                shape = RoundedCornerShape(999.dp),
+                color = Color(0xFF1E293B),
+                border = BorderStroke(1.dp, statusBadgeColor.copy(alpha = 0.7f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(statusBadgeColor, CircleShape)
+                    )
+                    Text(
+                        text = statusText,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Cek Ulang Koneksi",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
             }
-            drawPath(
-                path = path,
-                color = Color(0x33A7F3D0),
-                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-            )
-        }
 
-        val fishCenters = listOf(
-            Offset(w * 0.35f, h * 0.45f),
-            Offset(w * 0.6f, h * 0.38f),
-            Offset(w * 0.75f, h * 0.55f),
-            Offset(w * 0.25f, h * 0.7f),
-            Offset(w * 0.5f, h * 0.65f)
-        )
-
-        fishCenters.forEach { center ->
-            drawOval(
-                color = Color(0xFFF97316),
-                topLeft = Offset(center.x - 14.dp.toPx(), center.y - 6.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(28.dp.toPx(), 12.dp.toPx())
+            Text(
+                text = "IP Server Aktif: $hostPort",
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF38BDF8)
             )
-            drawCircle(
-                color = Color(0xFFEA580C),
-                radius = 3.dp.toPx(),
-                center = Offset(center.x + 8.dp.toPx(), center.y)
+
+            Text(
+                text = "Profil: ${resolution.label} • ${targetFps.label}",
+                fontSize = 10.5.sp,
+                color = Color(0xFFCBD5E1),
+                textAlign = TextAlign.Center
             )
         }
     }

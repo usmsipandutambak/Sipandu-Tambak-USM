@@ -1,4 +1,4 @@
-﻿package id.ac.usm.sipandutambak.ui.devices.detail
+package id.ac.usm.sipandutambak.ui.devices.detail
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.ac.usm.sipandutambak.R
+import id.ac.usm.sipandutambak.data.api.formatSensorMetric
 import id.ac.usm.sipandutambak.ui.components.AppSidebarMenu
 
 @Composable
@@ -242,14 +243,14 @@ fun DeviceDetailScreen(
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "TDS",
-                                    value = if (curTds > 0.0) curTds.toInt().toString() else "-",
+                                    value = formatSensorMetric(state.currentTds, 0),
                                     unit = "/ppm",
                                     iconType = "tds"
                                 )
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "PH",
-                                    value = if (curPh > 0.0) curPh.toString() else "-",
+                                    value = formatSensorMetric(state.currentPh, 2),
                                     unit = "/ph",
                                     iconType = "ph"
                                 )
@@ -262,14 +263,14 @@ fun DeviceDetailScreen(
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "Temperature",
-                                    value = if (curTemp > 0.0) curTemp.toInt().toString() else "-",
+                                    value = formatSensorMetric(state.currentTemp, 1),
                                     unit = "°C",
                                     iconType = "temp"
                                 )
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "DO",
-                                    value = if (curDo > 0.0) curDo.toString() else "-",
+                                    value = formatSensorMetric(state.currentDo, 1),
                                     unit = "mg/L",
                                     iconType = "do"
                                 )
@@ -282,14 +283,14 @@ fun DeviceDetailScreen(
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "Turbidity",
-                                    value = if (curTurb > 0.0) curTurb.toInt().toString() else "-",
+                                    value = formatSensorMetric(state.currentTurbidity, 1),
                                     unit = "NTU",
                                     iconType = "turb"
                                 )
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "NH4+",
-                                    value = "-",
+                                    value = state.currentNh4,
                                     unit = "mg/L",
                                     iconType = "flask"
                                 )
@@ -302,14 +303,14 @@ fun DeviceDetailScreen(
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "NO3-",
-                                    value = "-",
+                                    value = state.currentNo3,
                                     unit = "mg/L",
                                     iconType = "bucket"
                                 )
                                 SensorMetricTile(
                                     modifier = Modifier.weight(1f),
                                     title = "COD",
-                                    value = "-",
+                                    value = state.currentCod,
                                     unit = "mg/L",
                                     iconType = "mesh"
                                 )
@@ -590,14 +591,20 @@ fun DeviceDetailScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(log.timeLabel, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
-                                        Text(log.ph.toString(), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
-                                        Text((log.tds ?: 0.0).toInt().toString(), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
-                                        Text("" + log.temperature + "°C", fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
-                                        Text("" + (log.turbidity ?: 0.0).toInt(), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
+                                        Text(formatSensorMetric(log.ph, 2), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
+                                        Text(formatSensorMetric(log.tds, 0), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
+                                        Text(
+                                            text = log.temperature?.let { "${formatSensorMetric(it, 1)}°C" } ?: "N/A",
+                                            fontSize = 9.sp,
+                                            color = Color(0xFF0F172A),
+                                            modifier = Modifier.width(65.dp),
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Text(formatSensorMetric(log.turbidity, 1), fontSize = 9.sp, color = Color(0xFF0F172A), modifier = Modifier.width(65.dp), textAlign = TextAlign.Center)
                                         Text(log.cod, fontSize = 9.sp, color = Color(0xFF94A3B8), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
                                         Text(log.nh4, fontSize = 9.sp, color = Color(0xFF94A3B8), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
                                         Text(log.no3, fontSize = 9.sp, color = Color(0xFF94A3B8), modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
-                                        Text(log.doLevel.toString(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
+                                        Text(formatSensorMetric(log.doLevel, 1), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7), modifier = Modifier.width(55.dp), textAlign = TextAlign.Center)
 
                                         Box(modifier = Modifier.width(80.dp), contentAlignment = Alignment.Center) {
                                             Surface(

@@ -1,13 +1,14 @@
-// camera.js — Integrasi kamera Jetson Nano (MJPEG over HTTP)
+// camera.js — Integrasi kamera Jetson Nano (MJPEG over HTTP port 5000 /video_feed)
 'use strict';
 
 const CameraModule = (() => {
   const STREAM_IDS = ['cam-stream', 'dash-cam-stream'];
-  let _initialized = false;
-  let _statusTimer = null;
-  let _snapTimer   = null;
-  let _started     = false;
-  let _state       = 'standby';   // standby | live | offline
+  let _initialized  = false;
+  let _statusTimer  = null;
+  let _retryTimer   = null;
+  let _started      = false;
+  let _streamLoaded = false;
+  let _state        = 'standby';   // standby | live | offline
 
   const $ = (id) => document.getElementById(id);
 
@@ -15,7 +16,7 @@ const CameraModule = (() => {
   function _applyState(state) {
     const chip = {
       standby: { cls: 'camera-chip yellow', text: '● STANDBY' },
-      live:    { cls: 'camera-chip green',  text: '● LIVE' },
+      live:    { cls: 'camera-chip green',  text: '● ONLINE' },
       offline: { cls: 'camera-chip red',    text: '● OFFLINE' },
     }[state];
 
@@ -28,10 +29,13 @@ const CameraModule = (() => {
     if (sig) {
       if (state === 'live') {
         sig.className = 'camera-chip green';
-        sig.textContent = '● LIVE';
+        sig.textContent = '● ONLINE';
+      } else if (state === 'standby') {
+        sig.className = 'camera-chip yellow';
+        sig.textContent = 'CONNECTING...';
       } else {
         sig.className = 'camera-chip red';
-        sig.textContent = 'NO SIGNAL';
+        sig.textContent = 'OFFLINE';
       }
     }
 
@@ -50,9 +54,9 @@ const CameraModule = (() => {
     const src = $('cam-source-status');
     if (src) {
       const map = {
-        standby: ['Belum Terintegrasi', 'var(--color-warning)'],
-        live:    ['Online',             'var(--color-success)'],
-        offline: ['Offline',            'var(--color-danger)'],
+        standby: ['Menghubungkan...', 'var(--color-warning)'],
+        live:    ['Online',           'var(--color-success)'],
+        offline: ['Offline',          'var(--color-danger)'],
       }[state];
       src.textContent = map[0];
       src.style.color = map[1];
@@ -66,17 +70,22 @@ const CameraModule = (() => {
   }
 
   // ── Stream control ─────────────────────────────────────────────────────
-  function _startStreams() {
+  function _startStreams(cacheBust = false) {
     if (!JetsonAPI.isConfigured()) return;
+    const url = JetsonAPI.getStreamURL(cacheBust);
+    _streamLoaded = false;
     STREAM_IDS.forEach((id) => {
       const img = $(id);
       if (!img) return;
-      img.classList.remove('hidden');
-      img.src = JetsonAPI.getStreamURL();
+      img.src = url;
     });
+    const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+    set('cam-info-device', `Jetson Nano — ${JetsonAPI.getBaseURL()}`);
+    set('cam-info-protocol', `MJPEG — ${url}`);
   }
 
   function _stopStreams() {
+    _streamLoaded = false;
     STREAM_IDS.forEach((id) => {
       const img = $(id);
       if (!img) return;
@@ -85,49 +94,50 @@ const CameraModule = (() => {
     });
   }
 
+  function _onImgLoad(id) {
+    if (!_started) return;
+    _streamLoaded = true;
+    if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+    _setState('live');
+
+    const img = $(id);
+    if (img && img.naturalWidth > 0) {
+      const resEl = $('cam-info-resolution');
+      if (resEl && (!resEl.textContent || resEl.textContent.includes('Menunggu'))) {
+        resEl.textContent = `${img.naturalWidth}×${img.naturalHeight} (Live MJPEG)`;
+      }
+    }
+  }
+
   function _onImgError(id) {
-    if (!_started || _state !== 'live') return;
-    console.warn('[Camera] Stream error pada', id, '— fallback snapshot 1 FPS');
-    _startSnapshotFallback();
+    if (!_started) return;
+    _streamLoaded = false;
+    console.warn('[Camera] Stream gagal dimuat pada', id, '— URL:', JetsonAPI.getStreamURL());
+    _setState('offline');
+
+    if (!_retryTimer) {
+      _retryTimer = setTimeout(() => {
+        _retryTimer = null;
+        if (_started && !_streamLoaded) {
+          _startStreams(true);
+        }
+      }, 5000);
+    }
   }
 
-  function _startSnapshotFallback() {
-    if (_snapTimer) return;
-    _snapTimer = setInterval(() => {
-      STREAM_IDS.forEach((id) => {
-        const img = $(id);
-        if (img) img.src = JetsonAPI.getSnapshotURL();
-      });
-    }, 1000);
-  }
-
-  function _stopSnapshotFallback() {
-    if (_snapTimer) { clearInterval(_snapTimer); _snapTimer = null; }
-  }
-
-
-  // ── Status polling ─────────────────────────────────────────────────────
+  // ── Status polling (opsional /api/status) ──────────────────────────────
   async function _poll() {
     if (!_started || !JetsonAPI.isConfigured()) return;
     try {
       const st = await JetsonAPI.getStatus();
       _updateInfo(st);
-      if (st.camera_ok) {
-        const recovered = _state === 'offline';
+      if (st.camera_ok && !_streamLoaded) {
         _setState('live');
-        if (recovered) {          // kembali online -> sambungkan ulang stream
-          _stopSnapshotFallback();
-          _startStreams();
-        }
-      } else {
-        // server OK tapi kamera di Jetson bermasalah
-        _setState('offline');
+        _startStreams(true);
       }
-    } catch (err) {
-      if (_state !== 'offline') {
-        console.warn('[Camera] Jetson tidak merespons:', err.message);
-      }
-      _setState('offline');
+    } catch (_) {
+      // Server Flask port 5000 (/video_feed) tidak wajib memiliki /api/status;
+      // status ONLINE/OFFLINE ditentukan langsung oleh event onload / onerror pada <img>.
     }
   }
 
@@ -136,13 +146,12 @@ const CameraModule = (() => {
     const cam = st.camera || {};
     const stream = st.stream || {};
     set('cam-info-device',
-      'Jetson Nano — ' + (st.hostname || 'online') +
+      'Jetson Nano — ' + (st.hostname || JetsonAPI.getBaseURL()) +
       (cam.type ? ' · ' + cam.type : ''));
-    set('cam-info-resolution',
-      stream.width
-        ? `${stream.width}×${stream.height} @ ${Utils.fmt(stream.fps, 1)} FPS`
-        : 'Menunggu koneksi…');
-    set('cam-info-protocol', 'MJPEG — multipart/x-mixed-replace');
+    if (stream.width) {
+      set('cam-info-resolution', `${stream.width}×${stream.height} @ ${Utils.fmt(stream.fps, 1)} FPS`);
+    }
+    set('cam-info-protocol', `MJPEG — ${JetsonAPI.getStreamURL()}`);
   }
 
   // ── Fullscreen ─────────────────────────────────────────────────────────
@@ -182,7 +191,9 @@ const CameraModule = (() => {
 
     STREAM_IDS.forEach((id) => {
       const img = $(id);
-      if (img) img.addEventListener('error', () => _onImgError(id));
+      if (!img) return;
+      img.addEventListener('load', () => _onImgLoad(id));
+      img.addEventListener('error', () => _onImgError(id));
     });
 
     _applyState('standby');
@@ -193,8 +204,7 @@ const CameraModule = (() => {
     if (!JetsonAPI.isConfigured()) { _setState('standby'); return; }
     _started = true;
     if (_statusTimer) return;       // sudah berjalan
-    _stopSnapshotFallback();
-    _startStreams();
+    _startStreams(false);
     _poll();
     _statusTimer = setInterval(_poll, JetsonConfig.statusInterval);
   }
@@ -202,7 +212,7 @@ const CameraModule = (() => {
   function pause() {
     _started = false;
     if (_statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
-    _stopSnapshotFallback();
+    if (_retryTimer)  { clearTimeout(_retryTimer);   _retryTimer = null; }
     _stopStreams();
   }
 
@@ -210,7 +220,12 @@ const CameraModule = (() => {
     pause();
     _state = 'standby';             // paksa transisi state
     _applyState('standby');
-    start();
+    if (JetsonAPI.isConfigured()) {
+      _started = true;
+      _startStreams(true);
+      _poll();
+      _statusTimer = setInterval(_poll, JetsonConfig.statusInterval);
+    }
   }
 
   return { init, start, pause, restart };

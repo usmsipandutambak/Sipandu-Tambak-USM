@@ -570,16 +570,16 @@ def parse_args(argv=None):
                    help="Level log (default: INFO)")
 
     # Opsi MQTT & Tunnel
-    p.add_argument("--mqtt-broker", default="broker.hivemq.com",
-                   help="Broker MQTT (default: broker.hivemq.com, kosongkan untuk mematikan)")
+    p.add_argument("--mqtt-broker", default="192.168.100.41",
+                   help="Broker MQTT (default: 192.168.100.41, kosongkan untuk mematikan)")
     p.add_argument("--mqtt-port", type=int, default=1883,
                    help="Port broker MQTT (default: 1883)")
     p.add_argument("--mqtt-user", default="",
                    help="Username broker MQTT (opsional)")
     p.add_argument("--mqtt-pass", default="",
                    help="Password broker MQTT (opsional)")
-    p.add_argument("--device-id", default="Sipandu_A",
-                   help="ID perangkat (default: Sipandu_A)")
+    p.add_argument("--device-id", default="SIPANDU_A",
+                   help="ID perangkat (default: SIPANDU_A)")
     p.add_argument("--tunnel-url", default="",
                    help="Public URL Cloudflare/Ngrok jika memakai tunnel")
     p.add_argument("--no-auto-shutdown", dest="auto_shutdown", action="store_false", default=True,

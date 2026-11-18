@@ -1,110 +1,142 @@
-# SIPANDU TAMBAK — Sistem Terpadu Pemantauan & Kontrol Kualitas Air Tambak
+# SIPANDU-TAMBAK — Sistem Pemantauan Kualitas Air Tambak & Deteksi Ikan Real-Time
 
-Sistem IoT Terpadu Pemantauan dan Pengendalian Kualitas Air Tambak berbasis **ESP32 DevKit**, **Edge AI Jetson Nano**, **Cloud MQTT Broker (Eclipse Paho)**, **Database Supabase Cloud**, **Web Admin Dashboard SPA**, dan **Aplikasi Android Mobile (Jetpack Compose)**.
+**SIPANDU-TAMBAK** adalah sistem pemantauan kualitas air tambak dan pemantauan kamera bawah/permukaan air secara *real-time* yang mengintegrasikan perangkat **IoT ESP32**, **Edge AI NVIDIA Jetson Nano**, **Cloud Database Supabase**, **MQTT Broker**, **Web Admin Dashboard**, dan **Aplikasi Mobile Android**.
 
 ---
 
-## Arsitektur Monorepo
+## Arsitektur & Struktur Monorepo
 
-Proyek ini terstruktur ke dalam 4 modul utama:
-
-```
+```text
 SIPANDU-TAMBAK/
-├── firmware/         # Firmware Microcontroller ESP32 (Arduino C++)
-├── edge/             # Server Video Streaming & Edge Daemon Jetson Nano (Python)
-├── web/              # Web Admin Dashboard SPA (HTML5, Vanilla CSS, JS)
-├── mobile/           # Aplikasi Android Native (Kotlin, Jetpack Compose, MVVM)
-└── README.md         # Dokumentasi Utama
+├── firmware/
+│   ├── ESP32IoTADMIN/          # Sketch Arduino lengkap (ESP32IoTADMIN.ino + 6 modul .ino)
+│   └── README.md               # Panduan hardware, pinout, ADC ADS1115, NVS, & Supabase/MQTT
+├── edge/
+│   ├── stream_camera.py        # Server MJPEG & MQTT daemon headless untuk Jetson Nano
+│   ├── tunnel.sh               # Skrip publikasi tunnel (Cloudflare / Ngrok)
+│   └── README.md               # Panduan Edge AI Jetson Nano & layanan kamera
+├── web/
+│   ├── index.html              # Single Page Application (Dashboard, Control, Camera, Data)
+│   ├── assets/                 # CSS, JS modular (ESP32, Jetson, Supabase, MQTT, Kalibrasi)
+│   ├── docs/                   # Dokumentasi arsitektur Web Admin
+│   └── README.md               # Panduan menjalankan Web Admin & endpoint konfigurasi
+├── mobile/
+│   ├── app/                    # Aplikasi Android Kotlin + Jetpack Compose (id.ac.usm.sipandutambak)
+│   ├── gradle/                 # Gradle wrapper & katalog dependensi
+│   └── README.md               # Panduan build APK, fitur Compose, & sinkronisasi Supabase
+├── tests/
+│   └── stress_test_suite.py    # Skrip pengujian integrasi (MQTT, Supabase, Shutdown, MJPEG load)
+├── .gitignore
+└── README.md                   # Dokumentasi utama monorepo
 ```
 
 ---
 
-## Diagram Aliran Data & Integrasi
+## Ringkasan Komponen Sistem
 
-```
-                               ┌───────────────────────────┐
-                               │   CLOUD INFRASTRUCTURE    │
-                               │                           │
-                               │  Broker MQTT   Supabase   │
-                               │   (Paho)       Database   │
-                               └─────▲───┬─────────▲───────┘
-                                     │   │         │
-                 Real-time Telemetry │   │ Command │ Upload Riwayat
-                        (tiap 2-3s)  │   │ 2-Arah  │ (tiap 1 Menit)
-                                     │   │         │
-       ┌─────────────────────────────┴───▼─┐       │
-       │                                   │       │
-       │    ESP32 DevKit (firmware/)       ├───────┘
-       │    • Multi-Sensor: pH, DO, TDS,   │
-       │      Turbidity, Temp, Baterai     │
-       │    • MOSFET Daya Sensor & Jetson  │
-       │    • Graceful Shutdown Jetson 30s │
-       │                                   │
-       └─────────────────▲─────────────────┘
-                         │ Relai Daya (GPIO 33)
-                         ▼
-       ┌───────────────────────────────────┐
-       │     Jetson Nano (edge/)           │
-       │     • Stream Kamera MJPEG (8080)  ├───── Public HTTPS Tunnel ────┐
-       │     • Listener Shutdown Paho MQTT │     (Cloudflare / Ngrok)     │
-       └───────────────────────────────────┘                              │
-                                                                          ▼
-                                                       ┌──────────────────────────────┐
-                                                       │       APLIKASI KLIEN         │
-                                                       │                              │
-                                                       │ 1. Web Admin (web/)          │
-                                                       │ 2. Android Mobile (mobile/)  │
-                                                       │                              │
-                                                       │ • Live Telemetry Realtime    │
-                                                       │ • Live Stream Video Kamera   │
-                                                       │ • Kontrol & Kalibrasi Jarak  │
-                                                       │   Jauh dari Mana Saja        │
-                                                       └──────────────────────────────┘
-```
+### 1. `firmware/` (`ESP32IoTADMIN` & `MQTT_SUPABASE`)
+- **Mikrokontroler**: ESP32 DevKit (`DEVICE_ID = "SIPANDU_A"`, `POND_NUMBER = 5`, IP LAN `192.168.100.213`).
+- **Akuisisi Sensor**:
+  - `ADS1115 A` (`0x48`): **pH** (`A1`, dengan *voltage divider* koreksi `×1.5`) & **DO / Dissolved Oxygen** (`A0`).
+  - `ADS1115 B` (`0x49`): **TDS** (`A1`) & **Turbidity** (`A0`, dengan *voltage divider* koreksi `×1.5`).
+  - `DS18B20` (`GPIO 25`): Suhu air (°C).
+  - `INA226` (`0x44`): Tegangan baterai (V).
+  - `OLED SH1106` (`0x3C`): Tampilan status lokal `128×64`.
+- **Kalibrasi & API Lokal**: Parameter kalibrasi (`ph`, `do`, `tds`, `turbidity`) disimpan permanen pada **NVS (`Preferences` `"sipandu"`)** dan dapat diakses/diubah melalui **REST API lokal Port 80** (`/api/status`, `/api/sensors`, `/api/calibration`, `/api/calibration/reset`, `/api/control/sensors`, `/api/control/jetson`).
+- **Dual-Stream Telemetri**:
+  - **MQTT Broker** (`192.168.100.41:1883`): Publikasi tiap 3 detik ke `sipandu/devices/SIPANDU_A/telemetry` dan menerima perintah di `sipandu/devices/SIPANDU_A/command`.
+  - **Supabase REST** (tiap 60 detik): `POST /sensor_logs` via HTTPS (`WiFiClientSecure` dengan `setInsecure()`) serta sinkronisasi status `PATCH /devices`.
 
----
-
-## Ringkasan Per Modul
-
-### 1. `firmware/` (ESP32 DevKit)
-- **Komunikasi Dual-Stream**:
-  - **MQTT Real-Time (tiap 3s)**: Mengirim telemetri ke `sipandu/devices/Sipandu_A/telemetry`.
-  - **Supabase Riwayat (tiap 1 menit)**: Mengunggah log permanen ke tabel `sensor_logs` dan snapshot ke tabel `devices`.
-- **Command Subscriber**: Menerima perintah kendali daya dan kalibrasi sensor dari topic `sipandu/devices/Sipandu_A/command`.
-- **Proteksi Jetson Nano**: Menerapkan jeda hitung mundur 30 detik saat perintah shutdown diterima sebelum memutus relai MOSFET fisik.
-
-### 2. `edge/` (Jetson Nano)
-- **Streaming Kamera**: Skrip `stream_camera.py` melayani video MJPEG di port 8080 (kamera CSI, USB, atau test pattern).
-- **Paho MQTT Daemon**: Mendengarkan instruksi shutdown dan otomatis memicu `sudo shutdown -h now` secara aman.
-- **Tunneling**: Skrip `tunnel.sh` untuk mengekspos kamera ke internet publik lewat Cloudflare Tunnel / Ngrok.
+### 2. `edge/` (`stream_camera.py` di NVIDIA Jetson Nano)
+- Berjalan di **NVIDIA Jetson Nano (`192.168.100.41`)**.
+- Layanan utama kamera & inferensi deteksi objek ikan menyajikan **live MJPEG stream** di `http://192.168.100.41:5000/video_feed`.
+- `edge/stream_camera.py` menyediakan server streaming MJPEG *headless* (USB / CSI / `--test-pattern`) dengan listener MQTT `sipandu/devices/SIPANDU_A/command` untuk *graceful shutdown* Jetson Nano.
 
 ### 3. `web/` (Web Admin Dashboard)
-- Berbasis Vanilla JS modern + Lucide Icons tanpa framework runtime berat.
-- Terintegrasi dengan **Paho MQTT WebSocket** (`broker.hivemq.com:8000`) untuk pemantauan real-time & kendali jarak jauh.
-- Tetap memiliki fallback mode direct HTTP LAN (`192.168.1.xxx`) untuk pengujian lokal di tepi tambak.
+- Berbasis **HTML5 / CSS3 / Vanilla JavaScript** tanpa ketergantungan build framework.
+- Terhubung ke **ESP32** (`192.168.100.213`), **Kamera Jetson Nano** (`http://192.168.100.41:5000/video_feed` dengan indikator status otomatis `● ONLINE` saat stream termuat), **MQTT WebSocket** (`192.168.100.41`), dan **Supabase REST** (`supabase-client.js`).
+- Menyimpan dan menyinkronkan kalibrasi **pH, DO, TDS, dan Turbidity** secara bersamaan ke `localStorage`, tabel `devices` Supabase, dan HTTP/MQTT ESP32.
 
-### 4. `mobile/` (Android App)
-- Dibangun dengan Jetpack Compose, Coroutine, StateFlow, dan Retrofit.
-- **Kamera Terpadu**: `CameraMonitoringScreen` menampilkan feed video real-time dari Jetson Nano (IP lokal atau Cloudflare Tunnel).
-- **Kalibrasi Terpadu**: `CalibrationScreen` menyimpan dan menyinkronkan parameter sensor langsung ke database Supabase dan perangkat.
+### 4. `mobile/` (Aplikasi Android `id.ac.usm.sipandutambak`)
+- Dibangun dengan **Kotlin & Jetpack Compose** (Material 3, MVVM, Retrofit/OkHttp, WorkManager).
+- **Fitur Utama**:
+  - Pemantauan 8 parameter sensor *real-time* dari tabel `sensor_logs` Supabase beserta notifikasi ambang batas kualitas air.
+  - Grafik tren telemetri 24 jam & ekspor riwayat data ke **CSV**.
+  - **Monitoring Kamera Live (`CameraMonitoringScreen`)** berbasis `WebView` untuk stream MJPEG Jetson Nano (`http://192.168.100.41:5000/video_feed`) lengkap dengan dialog **Setting Kamera** (`SharedPreferences`: URL stream, tes koneksi HTTP, pilihan resolusi, FPS, dan durasi sesi).
+  - **Kalibrasi 2-Arah (`CalibrationScreen`)** yang membaca dan memperbarui parameter kalibrasi pH, DO, TDS, dan Turbidity di tabel `devices` Supabase.
+
+### 5. `tests/`
+- Berisi [stress_test_suite.py](tests/stress_test_suite.py) untuk menguji beban MQTT burst, latensi/timeout Supabase REST, simulasi siklus graceful shutdown Jetson, serta *concurrency load test* stream MJPEG.
 
 ---
 
-## Cara Menjalankan
+## Skema Database Supabase
 
-### Menjalankan Web Admin:
-```bash
-cd web
-python -m http.server 8080
-# Buka di browser: http://localhost:8080
-```
+Project Supabase: `tidmdjnjhqptszyubvue` (`https://tidmdjnjhqptszyubvue.supabase.co/rest/v1`).
 
-### Menjalankan Jetson Camera:
+### Tabel `sensor_logs`
+| Kolom | Tipe | Keterangan |
+| :--- | :--- | :--- |
+| `id` | `bigint` / `uuid` | Primary key auto-generated |
+| `device_id` | `text` | ID perangkat, contoh: `SIPANDU_A` |
+| `pond_number` | `integer` | Nomor kolam (default Alat A: `5`) |
+| `ph_level` | `double precision` | Nilai pH air (`0–14`) |
+| `do_level` | `double precision` | Kadar oksigen terlarut / DO (`mg/L`) |
+| `tds_ppm` | `double precision` | Total Dissolved Solids (`ppm`) |
+| `turbidity_ntu` | `double precision` | Kekeruhan air (`NTU`) |
+| `temperature_c` | `double precision` | Suhu air (`°C`) |
+| `battery_voltage` | `double precision` | Tegangan baterai sistem (`V`) |
+| `battery_current_a` | `double precision` | Arus baterai (`A`) |
+| `status` | `text` | Status kualitas air (`NORMAL` / `WASPADA` / `BAHAYA`) |
+| `created_at` | `timestamptz` | Waktu pencatatan server Supabase |
+
+### Tabel `devices` (Snapshot & Kalibrasi)
+Menyimpan identitas perangkat (`id`, `name`, `pond_number`, `commodity`, `ip_address`, `battery_percent`, `signal_quality`, `status`, `is_connected`, `last_seen`) serta koefisien kalibrasi yang disinkronkan antara Web Admin dan Android:
+- `ph_slope`, `ph_offset`
+- `do_slope`, `do_offset`
+- `tds_slope`, `tds_offset`
+- `turb_slope`, `turb_offset`
+
+> **SQL Migrasi Kolom DO** (jalankan di Supabase SQL Editor bila belum tersedia):
+> ```sql
+> ALTER TABLE sensor_logs ADD COLUMN IF NOT EXISTS do_level DOUBLE PRECISION;
+> ALTER TABLE devices ADD COLUMN IF NOT EXISTS do_slope DOUBLE PRECISION DEFAULT 5.5, ADD COLUMN IF NOT EXISTS do_offset DOUBLE PRECISION DEFAULT 0.0;
+> ```
+
+---
+
+## Panduan Instalasi & Menjalankan Setiap Modul
+
+### 1. Firmware ESP32 (`firmware/`)
+1. Buka `firmware/ESP32IoTADMIN/ESP32IoTADMIN.ino` di **Arduino IDE** (pastikan seluruh 7 file `.ino` berada dalam folder `firmware/ESP32IoTADMIN/`).
+2. Pasang library yang tercantum di [`firmware/README.md`](firmware/README.md).
+3. Pilih board **DOIT ESP32 DEVKIT V1**, pilih port COM USB ESP32 yang aktif, lalu klik **Upload** dan pantau Serial Monitor (`115200` baud).
+
+### 2. Edge Camera Jetson Nano (`edge/`)
 ```bash
 cd edge
 pip3 install paho-mqtt
-python3 stream_camera.py --mqtt-broker broker.hivemq.com --device-id Sipandu_A
+# Jalankan stream MJPEG pada port 5000 (atau gunakan layanan deteksi objek Jetson pada :5000/video_feed)
+python3 stream_camera.py --port 5000 --mqtt-broker 192.168.100.41 --device-id SIPANDU_A
 ```
+Detail opsi CLI dan systemd autostart tersedia di [`edge/README.md`](edge/README.md).
 
-### Menjalankan Android App:
-Buka folder `mobile/` di **Android Studio**, lalu jalankan di perangkat fisik atau emulator Android.
+### 3. Web Admin (`web/`)
+```bash
+cd web
+python -m http.server 3000
+```
+Buka browser ke `http://localhost:3000`. Panduan lengkap tersedia di [`web/README.md`](web/README.md).
+
+### 4. Aplikasi Android (`mobile/`)
+```bash
+cd mobile
+.\gradlew installDebug
+```
+Atau buka folder `mobile/` menggunakan **Android Studio** dan jalankan ke perangkat Android. Panduan lengkap tersedia di [`mobile/README.md`](mobile/README.md).
+
+### 5. Pengujian Integrasi (`tests/`)
+```bash
+pip install requests paho-mqtt
+python tests/stress_test_suite.py
+```

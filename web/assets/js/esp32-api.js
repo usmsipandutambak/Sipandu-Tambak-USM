@@ -2,7 +2,7 @@
 'use strict';
 
 const ESP32Config = {
-  baseURL: 'http://192.168.1.100',
+  baseURL: 'http://192.168.100.213',
   timeout: 5000,
   updateInterval: 2000,
 };

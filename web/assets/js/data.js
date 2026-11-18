@@ -67,15 +67,20 @@ const DataModule = (() => {
 
   function addRow(sensors) {
     if (!sensors) return;
+    const phVal   = sensors.ph ?? sensors.ph_level;
+    const doVal   = sensors.do_mg_l ?? sensors.do_level ?? sensors.dissolved_oxygen ?? sensors.do;
+    const tdsVal  = sensors.tds_ppm ?? sensors.tds;
+    const turbVal = sensors.turbidity_ntu ?? sensors.turbidity;
+    const tempVal = sensors.temperature_c ?? sensors.temperature;
     const row = {
       ts:              Date.now(),
-      ph:              sensors.ph,
-      do_mg_l:         sensors.do_mg_l,
-      tds_ppm:         sensors.tds_ppm,
-      turbidity_ntu:   sensors.turbidity_ntu,
-      temperature_c:   sensors.temperature_c,
+      ph:              phVal,
+      do_mg_l:         doVal,
+      tds_ppm:         tdsVal,
+      turbidity_ntu:   turbVal,
+      temperature_c:   tempVal,
       battery_voltage: sensors.battery_voltage,
-      status:          _statusText(sensors),
+      status:          _statusText({ ph: phVal, turbidity_ntu: turbVal }),
     };
     _rows.push(row);
     if (_rows.length > MAX_ROWS) _rows.shift();

@@ -79,7 +79,7 @@
         <div style="padding:10px 20px">
           <div class="form-group" style="margin-bottom:8px">
             <label class="form-label" style="color:#475569">IP ESP32</label>
-            <input id="esp32-ip-input" class="form-input" type="text" placeholder="192.168.1.100"
+            <input id="esp32-ip-input" class="form-input" type="text" placeholder="192.168.100.213" value="192.168.100.213"
               style="background:#0F172A;border-color:#334155;color:#CBD5E1;font-size:12px;padding:6px 8px;font-family:'Courier New',monospace" />
           </div>
           <button id="esp32-ip-save" class="btn btn-primary w-full" style="font-size:11px;padding:6px 10px">
@@ -88,7 +88,7 @@
 
           <div class="form-group" style="margin-bottom:8px;margin-top:14px">
             <label class="form-label" style="color:#475569">IP Jetson Nano</label>
-            <input id="jetson-ip-input" class="form-input" type="text" placeholder="192.168.1.101"
+            <input id="jetson-ip-input" class="form-input" type="text" placeholder="192.168.100.41" value="192.168.100.41"
               style="background:#0F172A;border-color:#334155;color:#CBD5E1;font-size:12px;padding:6px 8px;font-family:'Courier New',monospace" />
           </div>
           <button id="jetson-ip-save" class="btn btn-primary w-full" style="font-size:11px;padding:6px 10px">
@@ -96,8 +96,8 @@
           </button>
 
           <div class="form-group" style="margin-bottom:8px;margin-top:14px">
-            <label class="form-label" style="color:#475569">Broker MQTT (Paho Cloud)</label>
-            <input id="mqtt-host-input" class="form-input" type="text" placeholder="broker.hivemq.com"
+            <label class="form-label" style="color:#475569">Broker MQTT (Paho)</label>
+            <input id="mqtt-host-input" class="form-input" type="text" placeholder="192.168.100.41" value="192.168.100.41"
               style="background:#0F172A;border-color:#334155;color:#CBD5E1;font-size:12px;padding:6px 8px;font-family:'Courier New',monospace" />
           </div>
           <button id="mqtt-connect-btn" class="btn btn-primary w-full" style="font-size:11px;padding:6px 10px;background:#059669">
@@ -107,8 +107,8 @@
       </nav>
 
       <div class="sidebar-footer">
-        <div>Device: <span id="sidebar-device" style="color:#94A3B8">Sipandu_A</span></div>
-        <div style="margin-top:2px">Tambak #<span id="sidebar-pond" style="color:#94A3B8">1</span></div>
+        <div>Device: <span id="sidebar-device" style="color:#94A3B8">SIPANDU_A</span></div>
+        <div style="margin-top:2px">Tambak #<span id="sidebar-pond" style="color:#94A3B8">5</span></div>
       </div>
     </aside>
 
@@ -211,7 +211,7 @@
                 </div>
               </div>
               <div class="camera-hud-bl">
-                <span class="camera-chip">Tambak #1</span>
+                <span class="camera-chip">Tambak #5</span>
               </div>
             </div>
           </div>
@@ -576,11 +576,11 @@
               <h3>Kamera Belum Terhubung</h3>
               <p>Masukkan IP Jetson Nano di sidebar untuk memulai streaming</p>
               <p style="margin-top:4px;font-size:10px;opacity:.6">Stream MJPEG dari
-                http://&lt;jetson&gt;:8080/stream</p>
+                http://&lt;jetson&gt;:5000/video_feed</p>
             </div>
           </div>
           <div class="camera-hud-bl">
-            <span class="camera-chip">Tambak #1</span>
+            <span class="camera-chip">Tambak #5</span>
           </div>
           <div class="camera-hud-br">
             <span class="camera-chip red" id="cam-signal-chip">NO SIGNAL</span>
@@ -599,11 +599,11 @@
           </div>
           <div class="camera-info-card">
             <div class="camera-info-label">Protokol Streaming</div>
-            <div class="camera-info-value" id="cam-info-protocol">MJPEG — multipart/x-mixed-replace</div>
+            <div class="camera-info-value" id="cam-info-protocol">MJPEG — http://192.168.100.41:5000/video_feed</div>
           </div>
           <div class="camera-info-card">
             <div class="camera-info-label">Model Deteksi</div>
-            <div class="camera-info-value">YOLOv5n — dalam pengembangan</div>
+            <div class="camera-info-value">YOLOv5n — Deteksi Ikan Real-Time</div>
           </div>
         </div>
 
@@ -613,9 +613,9 @@
             <line x1="12" y1="9" x2="12" y2="13" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          <span>Cara pakai: jalankan <span class="font-mono">python3 stream_camera.py</span> di Jetson Nano (mode
-            headless/SSH), lalu masukkan IP Jetson di sidebar. Pastikan port <strong>8080</strong> terbuka dan
-            perangkat berada di jaringan yang sama. Buka <span class="font-mono">http://&lt;jetson&gt;:8080/</span>
+          <span>Cara pakai: jalankan server stream di Jetson Nano pada port <strong>5000</strong>
+            (<span class="font-mono">/video_feed</span>), lalu masukkan IP Jetson di sidebar. Pastikan kedua
+            perangkat berada di jaringan yang sama. Buka <span class="font-mono">http://192.168.100.41:5000/video_feed</span>
             di browser untuk tes langsung.</span>
         </div>
       </main>
@@ -661,6 +661,7 @@
   <!-- Scripts (order matters) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
   <script src="assets/js/utils.js"></script>
+  <script src="assets/js/supabase-client.js"></script>
   <script src="assets/js/mqtt-client.js"></script>
   <script src="assets/js/esp32-api.js"></script>
   <script src="assets/js/jetson-api.js"></script>
