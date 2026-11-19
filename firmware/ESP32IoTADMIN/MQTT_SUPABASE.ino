@@ -156,11 +156,13 @@ void publishJetsonShutdownNotice(int secondsRemaining) {
 
 // Callback saat menerima pesan di TOPIC_COMMAND dari Mobile / Web Admin
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
-  Serial.printf("[MQTT] Pesan diterima di topic [%s] (len=%d): ", topic,
+  Serial.printf("[MQTT] Pesan diterima di topic [%s] (len=%u): ", topic,
                 length);
-  char buf[length + 1];
-  memcpy(buf, payload, length);
-  buf[length] = '\0';
+  char buf[513];
+  memset(buf, 0, sizeof(buf));
+  unsigned int copyLen = (length < 512) ? length : 512;
+  memcpy(buf, payload, copyLen);
+  buf[copyLen] = '\0';
   Serial.println(buf);
 
   StaticJsonDocument<512> doc;

@@ -1,17 +1,24 @@
 void powerOnSensors() {
     digitalWrite(PIN_MOSFET_SENSOR, HIGH);
+    sensorPowerState = true;
+    Serial.printf("[POWER] MOSFET Sensor: ON (GPIO %d, Logic: HIGH)\n", PIN_MOSFET_SENSOR);
 }
 void powerOffSensors() {
     digitalWrite(PIN_MOSFET_SENSOR, LOW);
+    sensorPowerState = false;
+    Serial.printf("[POWER] MOSFET Sensor: OFF (GPIO %d, Logic: LOW)\n", PIN_MOSFET_SENSOR);
 }
 
 void powerOnJetson() {
+    jetsonShutdownPending = false;
     digitalWrite(PIN_MOSFET_JETSON, HIGH);
     jetsonPowerState = true;
+    Serial.printf("[POWER] MOSFET Jetson: ON (GPIO %d, Logic: HIGH)\n", PIN_MOSFET_JETSON);
 }
 void powerOffJetson() {
     digitalWrite(PIN_MOSFET_JETSON, LOW);
     jetsonPowerState = false;
+    Serial.printf("[POWER] MOSFET Jetson: OFF (GPIO %d, Logic: LOW)\n", PIN_MOSFET_JETSON);
 }
 
 void requestGracefulJetsonPowerOff() {
@@ -142,7 +149,8 @@ void handleSerialCommands() {
                 Serial.println(cmdBuf);
                 Serial.println(F("Valid"));
             }
-        } else {
+            memset(cmdBuf, 0, sizeof(cmdBuf));
+        } else if ((uint8_t)c >= 0x20 && (uint8_t)c <= 0x7E) {
             if (cmdLen < (sizeof(cmdBuf) - 1)) {
                 cmdBuf[cmdLen++] = c;
             }

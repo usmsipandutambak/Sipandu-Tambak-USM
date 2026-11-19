@@ -258,7 +258,7 @@
                 <path d="M18.36 6.64a9 9 0 11-12.73 0M12 2v10" />
               </svg>
             </div>
-            <p class="power-card-desc">MOSFET Sensor — GPIO 33. Mengontrol daya seluruh sensor kualitas air.</p>
+            <p class="power-card-desc">MOSFET Sensor — GPIO 32 (Active HIGH). Mengontrol daya seluruh sensor kualitas air.</p>
             <div class="power-card-footer">
               <span class="power-status-text" id="sensor-power-status">Tidak Aktif</span>
               <button class="power-btn" id="sensor-power-btn">OFF</button>
@@ -276,7 +276,7 @@
                 <line x1="12" y1="17" x2="12" y2="21" />
               </svg>
             </div>
-            <p class="power-card-desc">MOSFET Jetson — GPIO 32. Mengontrol daya Jetson Nano (integrasi mendatang).</p>
+            <p class="power-card-desc">MOSFET Jetson — GPIO 33 (Active HIGH, ON saat boot). Mengontrol suplai 12V ke buck converter Jetson Nano.</p>
             <div class="power-card-footer">
               <span class="power-status-text" id="jetson-power-status">Tidak Aktif</span>
               <button class="power-btn" id="jetson-power-btn">OFF</button>
@@ -525,16 +525,14 @@
          PAGE: CAMERA
     ══════════════════════════════════════════ -->
       <main class="page-content" id="page-camera">
-        <div class="page-header">
-          <h2>Kamera</h2>
-          <p>Streaming langsung dari Jetson Nano — MJPEG over HTTP</p>
-        </div>
-
-        <!-- Camera Controls Bar -->
-        <div class="flex flex-between mb-12" style="flex-wrap:wrap;gap:8px">
-          <div style="font-size:12px;color:var(--color-text-secondary)">
-            Sumber: <strong>Jetson Nano</strong> · Status: <span id="cam-source-status"
-              style="color:var(--color-warning);font-weight:600">Belum Terintegrasi</span>
+        <!-- Combined Header & Controls Bar -->
+        <div class="camera-topbar">
+          <div class="camera-topbar-left">
+            <h2 class="camera-title">Kamera</h2>
+            <span class="camera-substatus">
+              Sumber: <strong>Jetson Nano</strong> · Status:
+              <span id="cam-source-status" style="color:var(--color-warning);font-weight:600">Menghubungkan...</span>
+            </span>
           </div>
           <div class="camera-controls">
             <button class="btn btn-secondary btn-sm" id="camera-fullscreen-btn">
@@ -607,16 +605,13 @@
           </div>
         </div>
 
-        <div class="alert alert-warning mt-12">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <div class="alert alert-warning camera-guide-banner">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0">
             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          <span>Cara pakai: jalankan server stream di Jetson Nano pada port <strong>5000</strong>
-            (<span class="font-mono">/video_feed</span>), lalu masukkan IP Jetson di sidebar. Pastikan kedua
-            perangkat berada di jaringan yang sama. Buka <span class="font-mono">http://192.168.100.41:5000/video_feed</span>
-            di browser untuk tes langsung.</span>
+          <span>Server stream Jetson Nano berjalan di port <strong>5000</strong> (<span class="font-mono">/video_feed</span>) dalam jaringan yang sama.</span>
         </div>
       </main>
 

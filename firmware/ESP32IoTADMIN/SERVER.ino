@@ -1,7 +1,8 @@
 void addCORSHeaders() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.sendHeader("Access-Control-Allow-Private-Network", "true");
 }
 
 void handleOptions() {
@@ -202,15 +203,14 @@ void handleControlJetson() {
     bool power = doc["power"].as<bool>();
     if (power) {
         powerOnJetson();
-        jetsonPowerState = true;
     } else {
         powerOffJetson();
-        jetsonPowerState = false;
     }
 
-    StaticJsonDocument<64> resp;
+    StaticJsonDocument<96> resp;
     resp["ok"]           = true;
     resp["jetson_power"] = jetsonPowerState;
+    resp["gpio"]         = PIN_MOSFET_JETSON;
     String json;
     serializeJson(resp, json);
     server.send(200, "application/json", json);

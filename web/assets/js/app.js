@@ -22,20 +22,24 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── ESP32 IP Configuration ─────────────────────────────────────────────
   const ipInput    = document.getElementById('esp32-ip-input');
   const ipSaveBtn  = document.getElementById('esp32-ip-save');
-  const savedIP    = localStorage.getItem('esp32_ip') || sessionStorage.getItem('esp32_ip') || '192.168.100.213';
+  const headerIpEl = document.getElementById('header-ip');
+  const savedIP    = (localStorage.getItem('esp32_ip') || sessionStorage.getItem('esp32_ip') || '192.168.100.213').trim();
 
   if (savedIP) {
-    ESP32API.setBaseURL('http://' + savedIP.replace(/^https?:\/\//i, ''));
-    if (ipInput) ipInput.value = savedIP;
+    const cleanIP = savedIP.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    ESP32API.setBaseURL('http://' + cleanIP);
+    if (ipInput) ipInput.value = cleanIP;
+    if (headerIpEl) headerIpEl.textContent = cleanIP;
   }
 
   if (ipSaveBtn && ipInput) {
     ipSaveBtn.addEventListener('click', () => {
-      const ip = ipInput.value.trim();
+      const ip = ipInput.value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
       if (!ip) { Utils.toast('Masukkan alamat IP ESP32', 'error'); return; }
-      ESP32API.setBaseURL('http://' + ip.replace(/^https?:\/\//i, ''));
+      ESP32API.setBaseURL('http://' + ip);
       localStorage.setItem('esp32_ip', ip);
       sessionStorage.setItem('esp32_ip', ip);
+      if (headerIpEl) headerIpEl.textContent = ip;
       Realtime.restart();
       Utils.toast('IP ESP32 diperbarui: ' + ip, 'success');
     });

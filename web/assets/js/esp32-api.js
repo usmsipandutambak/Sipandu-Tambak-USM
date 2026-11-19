@@ -3,7 +3,7 @@
 
 const ESP32Config = {
   baseURL: 'http://192.168.100.213',
-  timeout: 5000,
+  timeout: 8000,
   updateInterval: 2000,
 };
 
@@ -14,12 +14,16 @@ const ESP32API = (() => {
   async function _fetch(path, options = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ESP32Config.timeout);
+    const headers = { ...(options.headers || {}) };
+    if (options.body && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     try {
       const res = await fetch(`${_baseURL}${path}`, {
         ...options,
         signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        headers,
       });
       clearTimeout(timer);
 

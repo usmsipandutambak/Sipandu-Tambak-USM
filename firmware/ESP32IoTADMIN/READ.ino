@@ -101,6 +101,7 @@ float readPH() {
 
     for (int i = 0; i < PH_SAMPLE_COUNT; i++) {
         adsPH.readADC_SingleEnded(1);
+        delay(10);
         int16_t raw = adsPH.readADC_SingleEnded(1);  // A1
         if (raw < 0) raw = 0;
         lastRaw = raw;
@@ -146,6 +147,7 @@ float readDO() {
 
     for (int i = 0; i < DO_SAMPLE_COUNT; i++) {
         adsDO.readADC_SingleEnded(0);
+        delay(10);
         int16_t raw = adsDO.readADC_SingleEnded(0);  // A0
         if (raw < 0) raw = 0;
         lastRaw = raw;
@@ -216,27 +218,34 @@ void readINA226() {
 void readAllSensors() {
     Serial.print(F("Turbidity"));
     turbidityNTU = readTurbidity();
+    delay(10); // Stabilisasi I2C sebelum pindah kanal ADC berikutnya
 
     Serial.print(F(" - TDS"));
     tdsPpm = readTDS();
+    delay(10); // Stabilisasi I2C sebelum pindah ke ADS1115 A
 
     Serial.print(F(" - pH"));
     phLevel = readPH();
+    delay(10); // Stabilisasi mux ADS1115 A sebelum baca DO
 
     Serial.print(F(" - DO"));
     doMgL = readDO();
+    delay(10);
 
     Serial.print(F(" - Temp"));
     temperatureC = readTemperature();
+    delay(10);
 
     Serial.println(F(" - Battery"));
     readINA226();
+    Serial.flush();
 }
 
 // JSON OUTPUT Format:
 //  {"ph":7.20,"do":6.80,"tds":150.5,"turbidity":12.3,"temp":28.50,"bat_v":12.80}
 void printJSON() {
     char buf[180];
+    memset(buf, 0, sizeof(buf));
     snprintf(buf, sizeof(buf),
         "{\"ph\":%.2f,\"do\":%.2f,\"tds\":%.1f,\"turbidity\":%.1f,"
         "\"temp\":%.2f,\"bat_v\":%.2f}",
@@ -247,5 +256,7 @@ void printJSON() {
         temperatureC,
         batVoltage
     );
+    buf[sizeof(buf) - 1] = '\0';
     Serial.println(buf);
+    Serial.flush();
 }

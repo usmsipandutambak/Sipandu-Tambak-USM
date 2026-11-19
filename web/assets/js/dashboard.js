@@ -94,17 +94,78 @@ function updateSensorCards(sensorData, sensorStatus, isConnected) {
   });
 }
 
+let _lastStatusData = null;
+
+function _setStatusCell(id, text, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  if (state === 'ok') el.style.color = 'var(--color-success)';
+  else if (state === 'error') el.style.color = 'var(--color-danger)';
+  else if (state === 'warn') el.style.color = 'var(--color-warning)';
+  else el.style.color = '';
+}
+
+function _updateHardwareRows(sensorStatus) {
+  if (!sensorStatus) return;
+  const map = [
+    ['status-ads-a', sensorStatus.ads_a],
+    ['status-ads-b', sensorStatus.ads_b],
+    ['status-ds18b20', sensorStatus.ds18b20],
+    ['status-ina226', sensorStatus.ina226],
+  ];
+  map.forEach(([id, ok]) => {
+    if (ok === true) _setStatusCell(id, 'OK', 'ok');
+    else if (ok === false) _setStatusCell(id, 'Error', 'error');
+  });
+}
+
 function updateESP32Status(statusData, isConnected) {
-  const dot = document.getElementById('conn-dot');
+  if (statusData) _lastStatusData = statusData;
+  const activeStatus = statusData || (isConnected ? _lastStatusData : null);
+
   const badge = document.getElementById('conn-badge');
   const badgeText = document.getElementById('conn-badge-text');
   const ipEl = document.getElementById('header-ip');
   const uptimeEl = document.getElementById('esp-uptime');
+  const configuredIp = (localStorage.getItem('esp32_ip') || ESP32API.getBaseURL().replace(/^https?:\/\//i, '') || '192.168.100.213').trim();
 
   if (badge) badge.className = `connection-badge ${isConnected ? 'online' : 'offline'}`;
   if (badgeText) badgeText.textContent = isConnected ? 'ESP32 Online' : 'ESP32 Offline';
-  if (ipEl) ipEl.textContent = (isConnected && statusData) ? statusData.ip_address || '—' : '—';
-  if (uptimeEl && isConnected && statusData) uptimeEl.textContent = 'Uptime: ' + Utils.fmtUptime(statusData.uptime_ms);
+  if (ipEl) {
+    ipEl.textContent = (activeStatus && activeStatus.ip_address) ? activeStatus.ip_address : configuredIp;
+  }
+
+  if (isConnected) Utils.hide('offline-alert');
+  else Utils.show('offline-alert');
+
+  _setStatusCell('status-esp32', isConnected ? 'Online' : 'Offline', isConnected ? 'ok' : 'error');
+
+  if (activeStatus && activeStatus.wifi_connected !== undefined) {
+    _setStatusCell(
+      'status-wifi',
+      activeStatus.wifi_connected ? 'Terhubung' : 'Terputus',
+      activeStatus.wifi_connected ? 'ok' : 'error'
+    );
+  } else if (isConnected) {
+    _setStatusCell('status-wifi', 'Terhubung', 'ok');
+  } else {
+    _setStatusCell('status-wifi', 'Terputus', 'error');
+  }
+
+  if (activeStatus && activeStatus.sensor_status) {
+    _updateHardwareRows(activeStatus.sensor_status);
+  } else if (!isConnected) {
+    ['status-ads-a', 'status-ads-b', 'status-ds18b20', 'status-ina226'].forEach(id => _setStatusCell(id, '—', null));
+  }
+
+  if (uptimeEl) {
+    if (isConnected && activeStatus && activeStatus.uptime_ms !== undefined) {
+      uptimeEl.textContent = Utils.fmtUptime(activeStatus.uptime_ms);
+    } else if (!isConnected) {
+      uptimeEl.textContent = '—';
+    }
+  }
 }
 
 function updateLastUpdate() {
@@ -136,6 +197,7 @@ function initDashboard() {
     const isConn = Realtime.isConnected();
     if (data) {
       updateSensorCards(data.sensors, data.sensor_status, isConn);
+      if (data.sensor_status) _updateHardwareRows(data.sensor_status);
       pushHistory(data.sensors);
       updateLastUpdate();
     } else {
@@ -152,6 +214,7 @@ function initDashboard() {
   });
 
   Realtime.on('connection', (connected) => {
+    if (!connected) _lastStatusData = null;
     updateESP32Status(null, connected);
     if (!connected) {
       updateSensorCards(null, null, false);

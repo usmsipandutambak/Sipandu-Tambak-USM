@@ -97,20 +97,27 @@ static unsigned long jetsonShutdownStartMs = 0;
 const unsigned long JETSON_SHUTDOWN_GRACE_PERIOD_MS = 30000UL;
 
 // ─── MQTT & SUPABASE SETTINGS (PAHO BROKER ECOSYSTEM) ─────────
-const char *MQTT_BROKER = "192.168.100.41"; // Broker MQTT lokal (Jetson Nano). Ganti ke "broker.hivemq.com" jika pakai broker publik.
-const int   MQTT_PORT   = 1883;
-const char *MQTT_USER   = "";
-const char *MQTT_PASS   = "";
+const char *MQTT_BROKER =
+    "192.168.100.41"; // Broker MQTT lokal (Jetson Nano). Ganti ke
+                      // "broker.hivemq.com" jika pakai broker publik.
+const int MQTT_PORT = 1883;
+const char *MQTT_USER = "";
+const char *MQTT_PASS = "";
 
 String TOPIC_TELEMETRY;
 String TOPIC_COMMAND;
 String TOPIC_STATUS;
 
-const char *SUPABASE_REST_URL = "https://tidmdjnjhqptszyubvue.supabase.co/rest/v1";
-const char *SUPABASE_KEY      = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpZG1kam5qaHFwdHN6eXVidnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NDMwMzEsImV4cCI6MjEwNTExOTAzMX0.G2VeWnkN5nexmaYKdA1jI9AjwM-sw1yPnF7uHlnkT20";
+const char *SUPABASE_REST_URL =
+    "https://tidmdjnjhqptszyubvue.supabase.co/rest/v1";
+const char *SUPABASE_KEY =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpZG1kam5qaHFwdHN6eXVidnVlIiwicm9sZSI6Im"
+    "Fub24iLCJpYXQiOjE3ODk1NDMwMzEsImV4cCI6MjEwNTExOTAzMX0."
+    "G2VeWnkN5nexmaYKdA1jI9AjwM-sw1yPnF7uHlnkT20";
 
-#define MQTT_PUBLISH_INTERVAL_MS    3000UL   // 3 detik real-time
-#define SUPABASE_UPLOAD_INTERVAL_MS 60000UL  // 60 detik (1 menit) riwayat log
+#define MQTT_PUBLISH_INTERVAL_MS 3000UL     // 3 detik real-time
+#define SUPABASE_UPLOAD_INTERVAL_MS 60000UL // 60 detik (1 menit) riwayat log
 
 // Prototipe fungsi dari MQTT_SUPABASE.ino & CONTROL.ino
 void initMQTT();
@@ -146,15 +153,19 @@ void setup() {
 
   Serial.begin(115200);
   delay(300);
+  Serial.println();
+  Serial.flush();
 
   Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(50000);
   delay(800);
 
   pinMode(PIN_MOSFET_JETSON, OUTPUT);
-  digitalWrite(PIN_MOSFET_JETSON, LOW);
+  powerOnJetson(); // Aktifkan MOSFET Jetson secara default saat booting (12V ->
+                   // buck converter 5V)
   pinMode(PIN_MOSFET_SENSOR, OUTPUT);
   digitalWrite(PIN_MOSFET_SENSOR, LOW);
+  sensorPowerState = false;
   delay(800);
 
   loadCalibration();
@@ -216,16 +227,16 @@ void loop() {
 void initSensors() {
   sensors.begin();
   delay(100); // Beri waktu stabilisasi bus OneWire
-  
+
   // Periksa ketersediaan perangkat
   int devCount = sensors.getDeviceCount();
   if (devCount > 0) {
     isDs18b20OK = true;
     sensors.setResolution(12);
-    Serial.printf("DS18B20 OK — Ditemukan %d sensor\n", devCount);
+    Serial.printf("DS18B20 OK - Ditemukan %d sensor\n", devCount);
   } else {
     isDs18b20OK = false;
-    Serial.println(F("ERROR DS18B20 — Perangkat tidak terdeteksi"));
+    Serial.println(F("ERROR DS18B20 - Perangkat tidak terdeteksi"));
   }
   delay(500);
 
@@ -235,7 +246,7 @@ void initSensors() {
   } else {
     isAdsAOK = true;
     adsA.setGain(GAIN_TWOTHIRDS);
-    Serial.println(F("ADS1115 A (0x48) OK — pH:A1, DO:A0"));
+    Serial.println(F("ADS1115 A (0x48) OK - pH:A1, DO:A0"));
   }
   delay(500);
 
@@ -245,7 +256,7 @@ void initSensors() {
   } else {
     isAdsBOK = true;
     adsB.setGain(GAIN_TWOTHIRDS);
-    Serial.println(F("ADS1115 B (0x49) OK — TDS:A1, Turbidity:A0"));
+    Serial.println(F("ADS1115 B (0x49) OK - TDS:A1, Turbidity:A0"));
   }
   delay(500);
 
@@ -259,7 +270,7 @@ void initSensors() {
     ina226.setAverage(INA226_AVERAGE_4);
     ina226.setConversionTime(INA226_CONV_TIME_1100);
     ina226.setMeasureMode(INA226_CONTINUOUS);
-    Serial.println(F("INA226 OK — Voltage-only mode"));
+    Serial.println(F("INA226 OK - Voltage-only mode"));
   } else {
     isIna226OK = false;
     Serial.println(F("ERROR INA226"));
