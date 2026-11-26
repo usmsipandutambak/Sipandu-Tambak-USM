@@ -45,6 +45,7 @@ web/package-lock.json
 Thumbs.db
 *.swp
 *.log
+*.tmp.*
 
 # Arduino / ESP32 build output
 firmware/build/
