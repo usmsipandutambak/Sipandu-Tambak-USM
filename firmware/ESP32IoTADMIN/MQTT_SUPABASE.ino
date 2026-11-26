@@ -28,6 +28,7 @@ void initMQTT() {
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(768); // Buffer JSON telemetri
+  mqttClient.setSocketTimeout(1); // Cegah blocking lama jika broker Jetson offline
 
   Serial.println(F("[MQTT] Inisialisasi MQTT Client (Paho compatible)"));
   Serial.printf("[MQTT] Broker: %s:%d\n", MQTT_BROKER, MQTT_PORT);
@@ -41,8 +42,8 @@ void connectMQTT() {
     return;
 
   unsigned long now = millis();
-  if (now - lastMqttReconnectMs < 5000)
-    return; // Coba reconnect tiap 5 detik
+  if (now - lastMqttReconnectMs < 15000)
+    return; // Jeda 15 detik antar-percobaan reconnect jika Jetson offline
   lastMqttReconnectMs = now;
 
   Serial.print(F("[MQTT] Menghubungkan ke broker MQTT... "));
@@ -259,8 +260,8 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   else if (action == "reset_calibration") {
     String sName = doc["sensor"] | "all";
     if (sName == "ph" || sName == "all") {
-      phSlope = -5.70f;
-      phOffset = 21.34f;
+      phSlope = -11.43f;
+      phOffset = 52.00f;
     }
     if (sName == "do" || sName == "all") {
       doSlope = 5.5f;
@@ -286,11 +287,12 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
 static int postSensorLogToSupabase(const String &endpointLogs, bool includeDoLevel) {
   WiFiClientSecure secureClient;
   secureClient.setInsecure();
-  secureClient.setTimeout(10); // 10 detik socket timeout
+  secureClient.setTimeout(4); // Timeout singkat 4 detik agar loop lokal tidak macet di sinyal lemah
 
   HTTPClient https;
   https.setReuse(false);
-  https.setTimeout(10000);
+  https.setConnectTimeout(4000);
+  https.setTimeout(4000);
 
   if (!https.begin(secureClient, endpointLogs)) {
     Serial.printf("[SUPABASE] Gagal inisialisasi HTTPS ke %s\n", endpointLogs.c_str());
@@ -361,17 +363,22 @@ void uploadToSupabasePeriodic() {
   int logCode = postSensorLogToSupabase(endpointLogs, true);
   if (logCode == 400) {
     Serial.println(F("[SUPABASE] Retry tanpa 'do_level' (tambahkan kolom do_level di tabel sensor_logs Supabase agar DO tersimpan)."));
-    postSensorLogToSupabase(endpointLogs, false);
+    logCode = postSensorLogToSupabase(endpointLogs, false);
+  }
+  if (logCode < 0) {
+    Serial.println(F("[SUPABASE] Internet/modem lambat atau terputus; lewati PATCH devices siklus ini."));
+    return;
   }
 
   // 2. Perbarui status live di tabel 'devices'
   WiFiClientSecure devClient;
   devClient.setInsecure();
-  devClient.setTimeout(10);
+  devClient.setTimeout(4);
 
   HTTPClient httpsDev;
   httpsDev.setReuse(false);
-  httpsDev.setTimeout(10000);
+  httpsDev.setConnectTimeout(4000);
+  httpsDev.setTimeout(4000);
   String endpointDevice = String(SUPABASE_REST_URL) + "/devices?id=eq." + DEVICE_ID;
   if (httpsDev.begin(devClient, endpointDevice)) {
     httpsDev.addHeader("Content-Type", "application/json");

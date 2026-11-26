@@ -12,8 +12,8 @@ static const char KEY_TURB_OFFSET[] = "turb_offset";
 void loadCalibration() {
     prefs.begin(NVS_NS, true);
 
-    phSlope    = prefs.getFloat(KEY_PH_SLOPE,    -5.70f);
-    phOffset   = prefs.getFloat(KEY_PH_OFFSET,   21.34f);
+    phSlope    = prefs.getFloat(KEY_PH_SLOPE,    -11.43f);
+    phOffset   = prefs.getFloat(KEY_PH_OFFSET,   52.00f);
     doSlope    = prefs.getFloat(KEY_DO_SLOPE,      5.5f);
     doOffset   = prefs.getFloat(KEY_DO_OFFSET,     0.0f);
     tdsSlope   = prefs.getFloat(KEY_TDS_SLOPE,  500.00f);
@@ -24,14 +24,22 @@ void loadCalibration() {
     prefs.end();
 
     // Guard against corrupted / NaN / zero-slope calibration stored in NVS
-    if (isnan(phSlope) || isinf(phSlope) || phSlope == 0.0f)       phSlope = -5.70f;
-    if (isnan(phOffset) || isinf(phOffset))                        phOffset = 21.34f;
+    if (isnan(phSlope) || isinf(phSlope) || phSlope == 0.0f)       phSlope = -11.43f;
+    if (isnan(phOffset) || isinf(phOffset))                        phOffset = 52.00f;
     if (isnan(doSlope) || isinf(doSlope) || doSlope <= 0.0f)       doSlope = 5.5f;
     if (isnan(doOffset) || isinf(doOffset))                        doOffset = 0.0f;
     if (isnan(tdsSlope) || isinf(tdsSlope) || tdsSlope <= 0.0f)    tdsSlope = 500.00f;
     if (isnan(tdsOffset) || isinf(tdsOffset))                      tdsOffset = 0.00f;
     if (isnan(turbSlope) || isinf(turbSlope) || turbSlope == 0.0f) turbSlope = -1120.4f;
     if (isnan(turbOffset) || isinf(turbOffset))                    turbOffset = 4895.87f;
+
+    // Jika NVS masih menyimpan pH Offset lama (> 53.0f, mis. 54.42), timpa permanen dengan konstanta baru
+    if (phOffset > 53.0f) {
+        Serial.printf("[NVS] Deteksi pH Offset lama (%.2f > 53.00) -> timpa ke Slope=-11.43, Offset=52.00\n", phOffset);
+        phSlope  = -11.43f;
+        phOffset = 52.00f;
+        saveCalibration();
+    }
 
     Serial.println(F("CL:"));
     Serial.printf( "      pH    slope=%.4f  offset=%.4f\n", phSlope,   phOffset);

@@ -6,16 +6,23 @@ const THRESHOLDS = {
   ph: { warn_lo: 6.5, crit_lo: 6.0, warn_hi: 8.5, crit_hi: 9.0, unit: '' },
   do_mg_l: { warn_lo: 4.0, crit_lo: 3.0, warn_hi: 14.0, crit_hi: 20.0, unit: 'mg/L' },
   tds_ppm: { warn_lo: 0, crit_lo: 0, warn_hi: 800, crit_hi: 1200, unit: 'ppm' },
-  turbidity_ntu: { warn_lo: 0, crit_lo: 0, warn_hi: 50, crit_hi: 100, unit: 'NTU' },
+  turbidity_ntu: { warn_lo: 0, crit_lo: 0, warn_hi: 25, crit_hi: 100, unit: 'NTU' },
   temperature_c: { warn_lo: 22, crit_lo: 18, warn_hi: 32, crit_hi: 35, unit: '°C' },
   battery_voltage: { warn_lo: 11.5, crit_lo: 11.0, warn_hi: 14.0, crit_hi: 15.0, unit: 'V' },
 };
 
 function getSensorStatus(key, val) {
+  if (val === null || val === undefined || Number.isNaN(Number(val))) return 'normal';
+  const numVal = Number(val);
+  if (key === 'turbidity_ntu') {
+    if (numVal < 0 || numVal > 100) return 'danger';
+    if (numVal > 25) return 'warning';
+    return 'normal';
+  }
   const t = THRESHOLDS[key];
   if (!t) return 'normal';
-  if (val <= t.crit_lo || val >= t.crit_hi) return 'danger';
-  if (val <= t.warn_lo || val >= t.warn_hi) return 'warning';
+  if (numVal <= t.crit_lo || numVal >= t.crit_hi) return 'danger';
+  if (numVal <= t.warn_lo || numVal >= t.warn_hi) return 'warning';
   return 'normal';
 }
 
@@ -75,7 +82,7 @@ function updateSensorCards(sensorData, sensorStatus, isConnected) {
       else if (s.id === 'turbidity') val = sensorData.turbidity;
       else if (s.id === 'temperature') val = sensorData.temperature;
     }
-    if (val === undefined || val === null) {
+    if (val === null || val === undefined || Number.isNaN(Number(val))) {
       valEl.textContent = '—';
       indEl.className = 'sensor-indicator ' + (hwOK ? 'ok' : 'error');
       badgeEl.className = 'sensor-badge badge-offline';

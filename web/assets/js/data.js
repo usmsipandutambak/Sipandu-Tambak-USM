@@ -18,8 +18,10 @@ const DataModule = (() => {
 
   function _statusText(sensors) {
     const { ph, turbidity_ntu } = sensors;
-    if (ph < 6.0 || ph > 9.0 || turbidity_ntu > 100) return 'BAHAYA';
-    if (ph < 6.5 || ph > 8.5 || turbidity_ntu > 50)  return 'WASPADA';
+    const hasTurb = turbidity_ntu !== null && turbidity_ntu !== undefined && !Number.isNaN(Number(turbidity_ntu));
+    const ntu = hasTurb ? Number(turbidity_ntu) : 0;
+    if (ph < 6.0 || ph > 9.0 || ntu < 0 || ntu > 100) return 'BAHAYA';
+    if (ph < 6.5 || ph > 8.5 || ntu > 25)  return 'WASPADA';
     return 'NORMAL';
   }
 

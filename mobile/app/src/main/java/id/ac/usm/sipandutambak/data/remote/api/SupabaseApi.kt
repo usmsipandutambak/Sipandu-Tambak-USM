@@ -20,6 +20,16 @@ fun JSONObject.optNullableDoubleAny(vararg keys: String): Double? {
     return null
 }
 
+fun JSONObject.optNullableIntAny(vararg keys: String): Int? {
+    for (key in keys) {
+        if (has(key) && !isNull(key)) {
+            val v = optDouble(key, Double.NaN)
+            if (!v.isNaN()) return v.toInt()
+        }
+    }
+    return null
+}
+
 fun JSONObject.optNullableStringAny(vararg keys: String): String? {
     for (key in keys) {
         if (has(key) && !isNull(key)) {
@@ -45,24 +55,63 @@ object SupabaseApi {
     private const val BASE_URL = "https://tidmdjnjhqptszyubvue.supabase.co"
     private const val ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpZG1kam5qaHFwdHN6eXVidnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NDMwMzEsImV4cCI6MjEwNTExOTAzMX0.G2VeWnkN5nexmaYKdA1jI9AjwM-sw1yPnF7uHlnkT20"
 
-    private fun executeGetJsonArray(pathWithQuery: String, timeoutMs: Int = 8000): JSONArray {
-        val endpoint = URL(BASE_URL + pathWithQuery)
-        val conn = (endpoint.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("apikey", ANON_KEY)
-            setRequestProperty("Authorization", "Bearer " + ANON_KEY)
-            connectTimeout = timeoutMs
-            readTimeout = timeoutMs
+    @Volatile
+    var lastNetworkError: String? = null
+        private set
+
+    private fun friendlyNetworkMessage(e: Exception): String {
+        val msg = e.localizedMessage.orEmpty()
+        return when {
+            e is java.net.SocketTimeoutException || msg.contains("timeout", ignoreCase = true) ->
+                "Sinyal Wi-Fi / internet lemah (timeout ke Supabase)"
+            e is java.net.UnknownHostException || e is java.net.ConnectException ->
+                "Koneksi internet tidak stabil / server tidak terjangkau"
+            else -> "Gangguan jaringan: ${msg.ifBlank { e.javaClass.simpleName }}"
         }
-        return try {
-            if (conn.responseCode == 200) {
-                JSONArray(conn.inputStream.bufferedReader().use(BufferedReader::readText))
-            } else {
-                JSONArray()
+    }
+
+    private fun executeGetJsonArray(pathWithQuery: String, timeoutMs: Int = 12000): JSONArray {
+        var lastEx: Exception? = null
+        for (attempt in 1..2) {
+            var conn: HttpURLConnection? = null
+            try {
+                val endpoint = URL(BASE_URL + pathWithQuery)
+                conn = (endpoint.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    setRequestProperty("apikey", ANON_KEY)
+                    setRequestProperty("Authorization", "Bearer " + ANON_KEY)
+                    connectTimeout = timeoutMs
+                    readTimeout = maxOf(timeoutMs, 15000)
+                }
+                val code = conn.responseCode
+                if (code == 200) {
+                    val body = conn.inputStream.bufferedReader().use(BufferedReader::readText)
+                    lastNetworkError = null
+                    return JSONArray(body)
+                } else {
+                    lastNetworkError = "Server merespons HTTP $code"
+                    return JSONArray()
+                }
+            } catch (e: Exception) {
+                lastEx = e
+                if (attempt < 2) {
+                    try {
+                        Thread.sleep(500)
+                    } catch (_: InterruptedException) {
+                    }
+                }
+            } finally {
+                try {
+                    conn?.disconnect()
+                } catch (_: Exception) {
+                }
             }
-        } finally {
-            conn.disconnect()
         }
+        if (lastEx != null) {
+            lastNetworkError = friendlyNetworkMessage(lastEx)
+            throw lastEx
+        }
+        return JSONArray()
     }
 
     suspend fun getDevices(): JSONArray = withContext(Dispatchers.IO) {

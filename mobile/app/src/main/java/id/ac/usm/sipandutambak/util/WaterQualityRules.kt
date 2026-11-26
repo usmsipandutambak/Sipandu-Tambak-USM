@@ -18,44 +18,70 @@ data class ParamAlert(
 object WaterQualityRules {
 
     fun evaluateDo(v: Double?): AlertLevel? = when {
-        v == null -> null
-        v < 3.0 -> AlertLevel.BAHAYA
+        v == null || v.isNaN() -> null
+        v < 3.0 || v > 14.0 -> AlertLevel.BAHAYA
         v < 5.0 -> AlertLevel.WASPADA
         else -> AlertLevel.NORMAL
     }
 
     fun evaluatePh(v: Double?): AlertLevel? = when {
-        v == null -> null
+        v == null || v.isNaN() -> null
         v < 6.0 || v > 9.0 -> AlertLevel.BAHAYA
         v < 6.5 || v > 8.5 -> AlertLevel.WASPADA
         else -> AlertLevel.NORMAL
     }
 
     fun evaluateTemp(v: Double?): AlertLevel? = when {
-        v == null -> null
-        v < 22.0 || v > 34.0 -> AlertLevel.BAHAYA
-        v < 25.0 || v > 32.0 -> AlertLevel.WASPADA
+        v == null || v.isNaN() -> null
+        v < 18.0 || v > 35.0 -> AlertLevel.BAHAYA
+        v < 20.0 || v > 32.0 -> AlertLevel.WASPADA
         else -> AlertLevel.NORMAL
     }
 
     fun evaluateTds(v: Double?): AlertLevel? = when {
-        v == null -> null
-        v > 1000.0 -> AlertLevel.BAHAYA
-        v > 500.0 -> AlertLevel.WASPADA
+        v == null || v.isNaN() -> null
+        v > 1500.0 -> AlertLevel.BAHAYA
+        v < 50.0 || v > 1000.0 -> AlertLevel.WASPADA
         else -> AlertLevel.NORMAL
     }
 
-    fun evaluateAll(ph: Double?, tds: Double?, temp: Double?, doLevel: Double?): List<ParamAlert> {
+    fun evaluateTurbidity(v: Double?): AlertLevel? = when {
+        v == null || v.isNaN() -> null
+        v < 0.0 || v > 100.0 -> AlertLevel.BAHAYA
+        v > 25.0 -> AlertLevel.WASPADA
+        else -> AlertLevel.NORMAL
+    }
+
+    fun evaluateAll(
+        ph: Double?,
+        tds: Double?,
+        temp: Double?,
+        doLevel: Double?,
+        turbidity: Double? = null
+    ): List<ParamAlert> {
         val list = mutableListOf<ParamAlert>()
         evaluateDo(doLevel)?.let { list.add(ParamAlert("Oksigen Terlarut (DO)", it, doLevel!!, "mg/L")) }
         evaluatePh(ph)?.let { list.add(ParamAlert("pH", it, ph!!, "")) }
         evaluateTemp(temp)?.let { list.add(ParamAlert("Suhu", it, temp!!, "°C")) }
         evaluateTds(tds)?.let { list.add(ParamAlert("TDS", it, tds!!, "ppm")) }
+        evaluateTurbidity(turbidity)?.let { list.add(ParamAlert("Turbidity", it, turbidity!!, "NTU")) }
         return list
     }
 
     fun overallStatus(alerts: List<ParamAlert>): AlertLevel =
         alerts.maxByOrNull { it.level.rank }?.level ?: AlertLevel.NORMAL
+
+    fun evaluateStatusLabel(
+        ph: Double?,
+        tds: Double?,
+        temp: Double?,
+        doLevel: Double?,
+        turbidity: Double?,
+        fallback: String = "NORMAL"
+    ): String {
+        val alerts = evaluateAll(ph, tds, temp, doLevel, turbidity)
+        return if (alerts.isNotEmpty()) overallStatus(alerts).label else fallback
+    }
 }
 
 object AlertMonitor {
@@ -70,10 +96,11 @@ object AlertMonitor {
         ph: Double?,
         tds: Double?,
         temp: Double?,
-        doLevel: Double?
+        doLevel: Double?,
+        turbidity: Double? = null
     ) {
         val now = System.currentTimeMillis()
-        WaterQualityRules.evaluateAll(ph, tds, temp, doLevel).forEach { a ->
+        WaterQualityRules.evaluateAll(ph, tds, temp, doLevel, turbidity).forEach { a ->
             val key = deviceId + ":" + a.param
             val prev = lastLevel[key] ?: AlertLevel.NORMAL
             lastLevel[key] = a.level

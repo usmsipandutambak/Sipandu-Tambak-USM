@@ -34,7 +34,8 @@ class SensorAlertWorker(
                     ph = latestLog?.optNullableDoubleAny("ph_level", "ph") ?: dev.optNullableDoubleAny("live_ph", "ph_level"),
                     tds = latestLog?.optNullableDoubleAny("tds_ppm", "tds") ?: dev.optNullableDoubleAny("live_tds", "tds_ppm"),
                     temp = latestLog?.optNullableDoubleAny("temperature_c", "temp") ?: dev.optNullableDoubleAny("live_temp", "temperature_c"),
-                    doLevel = latestLog?.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do") ?: dev.optNullableDoubleAny("live_do", "do_level", "dissolved_oxygen")
+                    doLevel = latestLog?.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do") ?: dev.optNullableDoubleAny("live_do", "do_level", "dissolved_oxygen"),
+                    turbidity = latestLog?.optNullableDoubleAny("turbidity_ntu", "turbidity") ?: dev.optNullableDoubleAny("live_turb", "turbidity_ntu")
                 )
             }
 

@@ -7,8 +7,12 @@ import androidx.lifecycle.viewModelScope
 import id.ac.usm.sipandutambak.data.api.SupabaseApi
 import id.ac.usm.sipandutambak.data.api.formatSensorMetric
 import id.ac.usm.sipandutambak.data.api.optNullableDoubleAny
+import id.ac.usm.sipandutambak.data.api.optNullableIntAny
 import id.ac.usm.sipandutambak.data.api.optNullableStringAny
+import id.ac.usm.sipandutambak.data.remote.mqtt.MqttTelemetryClient
+import id.ac.usm.sipandutambak.ui.util.WaterQualityRules
 import id.ac.usm.sipandutambak.util.CsvExportHelper
+import id.ac.usm.sipandutambak.util.WibTimeUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -19,10 +23,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
+import org.json.JSONObject
 import java.util.Locale
-import java.util.TimeZone
 
 data class SensorLogRow(
     val timeLabel: String,
@@ -34,8 +36,12 @@ data class SensorLogRow(
     val nh4: String = "N/A",
     val no3: String = "N/A",
     val doLevel: Double? = null,
+    val batteryVoltage: Double? = null,
+    val batteryCurrentA: Double? = null,
+    val pondNumber: Int? = null,
     val status: String = "NORMAL",
-    val fullTime: String = ""
+    val fullTime: String = "",
+    val isLiveMqtt: Boolean = false
 )
 
 enum class CsvFormat(val label: String, val decimalComma: Boolean) {
@@ -75,6 +81,10 @@ data class DeviceDetailUiState(
     val currentCod: String = "N/A",
     val currentNh4: String = "N/A",
     val currentNo3: String = "N/A",
+    val batteryVoltage: Double? = null,
+    val batteryCurrentA: Double? = null,
+    val networkError: String? = null,
+    val isMqttConnected: Boolean = false,
     val hasData: Boolean = false,
     val logs: List<SensorLogRow> = emptyList(),
     val trendPoints: List<Double> = emptyList(),
@@ -98,12 +108,99 @@ class DeviceDetailViewModel(
     val uiState: StateFlow<DeviceDetailUiState> = _uiState.asStateFlow()
 
     private var pollingJob: Job? = null
+    private val mqttClient = MqttTelemetryClient(
+        brokerHost = MqttTelemetryClient.DEFAULT_BROKER_HOST,
+        brokerPort = MqttTelemetryClient.DEFAULT_BROKER_PORT,
+        topicFilter = MqttTelemetryClient.DEFAULT_TELEMETRY_TOPIC
+    )
 
     init {
-        val dateStr = SimpleDateFormat("dd MMM yyyy", Locale("id", "ID")).format(Date())
+        val dateStr = WibTimeUtil.formatNowWib("dd MMM yyyy")
         _uiState.update { it.copy(currentDateFormatted = dateStr) }
         loadCalibrationFromSupabase()
         startRealtimePolling()
+        startMqttTelemetry()
+    }
+
+    private fun startMqttTelemetry() {
+        mqttClient.start(
+            scope = viewModelScope,
+            onConnectionChanged = { connected ->
+                _uiState.update { it.copy(isMqttConnected = connected) }
+            },
+            onTelemetryMessage = { _, payload ->
+                handleMqttTelemetryPayload(payload)
+            }
+        )
+    }
+
+    private fun handleMqttTelemetryPayload(payload: String) {
+        try {
+            val root = JSONObject(payload)
+            val msgDevId = root.optNullableStringAny("device_id")
+            if (!msgDevId.isNullOrBlank() && deviceId.isNotBlank() && !msgDevId.equals(deviceId, ignoreCase = true)) {
+                return
+            }
+
+            val sens = root.optJSONObject("sensors") ?: root
+            val ph = sens.optNullableDoubleAny("ph", "ph_level", "live_ph")
+            val tds = sens.optNullableDoubleAny("tds_ppm", "tds", "live_tds")
+            val temp = sens.optNullableDoubleAny("temperature_c", "temperature", "temp", "live_temp")
+            val turb = sens.optNullableDoubleAny("turbidity_ntu", "turbidity", "turb", "live_turb")
+            val doVal = sens.optNullableDoubleAny("do_mg_l", "do_level", "dissolved_oxygen", "do", "live_do")
+            val batV = sens.optNullableDoubleAny("battery_voltage", "bat_v")
+            val batI = sens.optNullableDoubleAny("battery_current_a", "bat_i")
+            val pondNum = root.optNullableIntAny("pond_number")
+            val evalStatus = WaterQualityRules.evaluateStatusLabel(
+                ph = ph,
+                tds = tds,
+                temp = temp,
+                doLevel = doVal,
+                turbidity = turb,
+                fallback = root.optNullableStringAny("status") ?: "NORMAL"
+            )
+
+            val shortTime = WibTimeUtil.formatNowWib("HH:mm:ss")
+            val fullTime = WibTimeUtil.formatNowWib("yyyy-MM-dd HH:mm:ss")
+            val newRow = SensorLogRow(
+                timeLabel = shortTime,
+                fullTime = fullTime,
+                ph = ph,
+                tds = tds,
+                temperature = temp,
+                turbidity = turb,
+                cod = _uiState.value.currentCod,
+                nh4 = _uiState.value.currentNh4,
+                no3 = _uiState.value.currentNo3,
+                doLevel = doVal,
+                batteryVoltage = batV,
+                batteryCurrentA = batI,
+                pondNumber = pondNum,
+                status = evalStatus,
+                isLiveMqtt = true
+            )
+
+            _uiState.update { current ->
+                val updatedLogs = (listOf(newRow) + current.logs).take(60)
+                current.copy(
+                    hasData = true,
+                    isMqttConnected = true,
+                    networkError = null,
+                    currentPh = ph ?: current.currentPh,
+                    currentTds = tds ?: current.currentTds,
+                    currentTemp = temp ?: current.currentTemp,
+                    currentTurbidity = turb ?: current.currentTurbidity,
+                    currentDo = doVal ?: current.currentDo,
+                    batteryVoltage = batV ?: current.batteryVoltage,
+                    batteryCurrentA = batI ?: current.batteryCurrentA,
+                    status = evalStatus,
+                    logs = updatedLogs,
+                    trendPoints = updatedLogs.mapNotNull { it.ph }.reversed()
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     fun loadCalibrationFromSupabase() {
@@ -146,7 +243,7 @@ class DeviceDetailViewModel(
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                delay(5000)
+                delay(30_000)
             }
         }
     }
@@ -163,22 +260,11 @@ class DeviceDetailViewModel(
             }
             val list = mutableListOf<SensorLogRow>()
 
-            val inFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            val outFormat = SimpleDateFormat("HH:mm", Locale("id", "ID"))
-            val fullFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale("id", "ID"))
-
             for (i in 0 until jsonLogs.length()) {
                 val obj = jsonLogs.getJSONObject(i)
-                val rawDate: String = obj.optString("created_at", "")
-                val parsedDate = try {
-                    if (rawDate.length >= 19) inFormat.parse(rawDate.substring(0, 19)) else null
-                } catch (e: Exception) {
-                    null
-                }
-                val formattedTime = parsedDate?.let { outFormat.format(it) } ?: "-"
-                val fullTime = parsedDate?.let { fullFormat.format(it) } ?: "-"
+                val rawDate: String = obj.optNullableStringAny("created_at") ?: ""
+                val formattedTime = WibTimeUtil.formatIsoToWibTime(rawDate, "HH:mm")
+                val fullTime = WibTimeUtil.formatIsoToWibTime(rawDate, "yyyy-MM-dd HH:mm:ss")
 
                 val codVal = obj.optNullableDoubleAny("cod", "cod_mg_l")?.let { formatSensorMetric(it, 1) }
                     ?: obj.optNullableStringAny("cod")
@@ -190,59 +276,110 @@ class DeviceDetailViewModel(
                     ?: obj.optNullableStringAny("no3")
                     ?: "N/A"
 
+                val phVal = obj.optNullableDoubleAny("ph_level", "ph", "live_ph")
+                val tdsVal = obj.optNullableDoubleAny("tds_ppm", "tds", "live_tds")
+                val tempVal = obj.optNullableDoubleAny("temperature_c", "temperature", "temp", "live_temp")
+                val turbVal = obj.optNullableDoubleAny("turbidity_ntu", "turbidity", "turb", "live_turb")
+                val doVal = obj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do")
+                val evaluatedStatus = WaterQualityRules.evaluateStatusLabel(
+                    ph = phVal,
+                    tds = tdsVal,
+                    temp = tempVal,
+                    doLevel = doVal,
+                    turbidity = turbVal,
+                    fallback = obj.optNullableStringAny("status") ?: "NORMAL"
+                )
+
                 list.add(
                     SensorLogRow(
                         timeLabel = formattedTime,
                         fullTime = fullTime,
-                        ph = obj.optNullableDoubleAny("ph_level", "ph", "live_ph"),
-                        tds = obj.optNullableDoubleAny("tds_ppm", "tds", "live_tds"),
-                        temperature = obj.optNullableDoubleAny("temperature_c", "temperature", "temp", "live_temp"),
-                        turbidity = obj.optNullableDoubleAny("turbidity_ntu", "turbidity", "turb", "live_turb"),
+                        ph = phVal,
+                        tds = tdsVal,
+                        temperature = tempVal,
+                        turbidity = turbVal,
                         cod = codVal,
                         nh4 = nh4Val,
                         no3 = no3Val,
-                        doLevel = obj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do"),
-                        status = obj.optString("status", "NORMAL")
+                        doLevel = doVal,
+                        batteryVoltage = obj.optNullableDoubleAny("battery_voltage", "bat_v"),
+                        batteryCurrentA = obj.optNullableDoubleAny("battery_current_a", "bat_i"),
+                        pondNumber = obj.optNullableIntAny("pond_number"),
+                        status = evaluatedStatus
                     )
                 )
             }
 
             val latest = list.firstOrNull()
+            val netErr = SupabaseApi.lastNetworkError
             if (latest != null) {
                 _uiState.update { current ->
+                    val liveMqttPrefix = current.logs.filter { it.isLiveMqtt }.take(30)
+                    val mergedLogs = (liveMqttPrefix + list).take(60)
+                    val activeLatest = liveMqttPrefix.firstOrNull() ?: latest
                     current.copy(
                         hasData = true,
-                        currentPh = latest.ph,
-                        currentTds = latest.tds,
-                        currentTemp = latest.temperature,
-                        currentTurbidity = latest.turbidity,
-                        currentDo = latest.doLevel,
-                        currentCod = latest.cod,
-                        currentNh4 = latest.nh4,
-                        currentNo3 = latest.no3,
-                        status = latest.status,
-                        logs = list,
-                        trendPoints = list.mapNotNull { it.ph }.reversed()
+                        currentPh = activeLatest.ph,
+                        currentTds = activeLatest.tds,
+                        currentTemp = activeLatest.temperature,
+                        currentTurbidity = activeLatest.turbidity,
+                        currentDo = activeLatest.doLevel,
+                        currentCod = activeLatest.cod,
+                        currentNh4 = activeLatest.nh4,
+                        currentNo3 = activeLatest.no3,
+                        batteryVoltage = activeLatest.batteryVoltage,
+                        batteryCurrentA = activeLatest.batteryCurrentA,
+                        status = activeLatest.status,
+                        networkError = if (current.isMqttConnected) null else netErr,
+                        logs = mergedLogs,
+                        trendPoints = mergedLogs.mapNotNull { it.ph }.reversed()
                     )
                 }
             } else {
                 val liveObj = SupabaseApi.getLiveDeviceTelemetry(deviceId)
                 if (liveObj != null) {
+                    val phVal = liveObj.optNullableDoubleAny("ph_level", "live_ph", "ph")
+                    val tdsVal = liveObj.optNullableDoubleAny("tds_ppm", "live_tds", "tds")
+                    val tempVal = liveObj.optNullableDoubleAny("temperature_c", "live_temp", "temp")
+                    val turbVal = liveObj.optNullableDoubleAny("turbidity_ntu", "live_turb", "turb")
+                    val doVal = liveObj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do")
+                    val evaluatedStatus = WaterQualityRules.evaluateStatusLabel(
+                        ph = phVal,
+                        tds = tdsVal,
+                        temp = tempVal,
+                        doLevel = doVal,
+                        turbidity = turbVal,
+                        fallback = liveObj.optNullableStringAny("status") ?: currentStatusOrDefault()
+                    )
                     _uiState.update { current ->
-                        current.copy(
-                            hasData = true,
-                            currentPh = liveObj.optNullableDoubleAny("ph_level", "live_ph", "ph"),
-                            currentTds = liveObj.optNullableDoubleAny("tds_ppm", "live_tds", "tds"),
-                            currentTemp = liveObj.optNullableDoubleAny("temperature_c", "live_temp", "temp"),
-                            currentTurbidity = liveObj.optNullableDoubleAny("turbidity_ntu", "live_turb", "turb"),
-                            currentDo = liveObj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do"),
-                            status = liveObj.optString("status", current.status)
-                        )
+                        if (current.isMqttConnected && current.logs.any { it.isLiveMqtt }) {
+                            current.copy(networkError = null)
+                        } else {
+                            current.copy(
+                                hasData = true,
+                                currentPh = phVal,
+                                currentTds = tdsVal,
+                                currentTemp = tempVal,
+                                currentTurbidity = turbVal,
+                                currentDo = doVal,
+                                batteryVoltage = liveObj.optNullableDoubleAny("battery_voltage", "bat_v"),
+                                batteryCurrentA = liveObj.optNullableDoubleAny("battery_current_a", "bat_i"),
+                                status = evaluatedStatus,
+                                networkError = SupabaseApi.lastNetworkError
+                            )
+                        }
+                    }
+                } else if (netErr != null) {
+                    _uiState.update { current ->
+                        current.copy(networkError = if (current.isMqttConnected) null else netErr)
                     }
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            _uiState.update { current ->
+                current.copy(networkError = SupabaseApi.lastNetworkError ?: "Koneksi ke server lambat / terputus")
+            }
         }
     }
 
@@ -344,9 +481,12 @@ class DeviceDetailViewModel(
         }
     }
 
+    private fun currentStatusOrDefault(): String = _uiState.value.status.ifBlank { "NORMAL" }
+
     override fun onCleared() {
         super.onCleared()
         pollingJob?.cancel()
+        mqttClient.stop()
     }
 
     class Factory(

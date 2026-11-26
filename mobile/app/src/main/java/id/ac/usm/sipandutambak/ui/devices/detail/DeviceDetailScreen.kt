@@ -152,6 +152,24 @@ fun DeviceDetailScreen(
                         textAlign = TextAlign.Center
                     )
 
+                    if (state.networkError != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFFEF3C7),
+                            border = BorderStroke(1.dp, Color(0xFFF59E0B))
+                        ) {
+                            Text(
+                                text = "Sinyal lemah: ${state.networkError} (mencoba ulang...)",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF92400E),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Surface(
@@ -583,7 +601,19 @@ fun DeviceDetailScreen(
                                 }
                             } else {
                                 for (log in state.logs) {
-                                    val isDanger = log.status.equals("BAHAYA", true)
+                                    val statusUpper = log.status.uppercase()
+                                    val isDanger = statusUpper == "BAHAYA" || statusUpper == "KRITIS"
+                                    val isWarn = statusUpper == "WASPADA" || statusUpper == "PERINGATAN"
+                                    val badgeBgColor = when {
+                                        isDanger -> Color(0xFFFECDD3)
+                                        isWarn -> Color(0xFFFEF08A)
+                                        else -> Color(0xFF86EFAC)
+                                    }
+                                    val badgeTextColor = when {
+                                        isDanger -> Color(0xFF991B1B)
+                                        isWarn -> Color(0xFF92400E)
+                                        else -> Color(0xFF065F46)
+                                    }
                                     Row(
                                         modifier = Modifier
                                             .width(740.dp)
@@ -609,15 +639,15 @@ fun DeviceDetailScreen(
                                         Box(modifier = Modifier.width(80.dp), contentAlignment = Alignment.Center) {
                                             Surface(
                                                 shape = RoundedCornerShape(10.dp),
-                                                color = if (isDanger) Color(0xFFFECDD3) else Color(0xFF86EFAC),
+                                                color = badgeBgColor,
                                                 modifier = Modifier.height(18.dp)
                                             ) {
                                                 Box(modifier = Modifier.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
                                                     Text(
-                                                        text = log.status.uppercase(),
+                                                        text = statusUpper,
                                                         fontSize = 7.5.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = if (isDanger) Color(0xFF991B1B) else Color(0xFF065F46)
+                                                        color = badgeTextColor
                                                     )
                                                 }
                                             }
@@ -785,10 +815,14 @@ fun TelemetryChartCanvasFull(
             )
         }
 
-        val timeLabels = if (logs.isNotEmpty()) {
-            logs.take(5).map { it.timeLabel }.reversed()
+        val orderedLogs = logs.take(20).reversed()
+        val timeLabels = if (orderedLogs.isNotEmpty()) {
+            val step = maxOf(1, (orderedLogs.size - 1) / 4)
+            orderedLogs.mapIndexedNotNull { idx, item ->
+                if (idx == 0 || idx == orderedLogs.lastIndex || idx % step == 0) item.timeLabel else null
+            }.distinct().take(5)
         } else {
-            listOf("08:00", "09:00", "10:00 (AKTIF)", "11:00", "12:00")
+            listOf("08:00", "09:00", "10:00", "11:00", "12:00")
         }
 
         timeLabels.forEachIndexed { index, label ->
@@ -796,12 +830,12 @@ fun TelemetryChartCanvasFull(
             val x = leftMargin + graphW * ratio
             drawContext.canvas.nativeCanvas.drawText(
                 label,
-                x - 14.dp.toPx(),
+                (x - 14.dp.toPx()).coerceIn(leftMargin, w - 34.dp.toPx()),
                 h - 4.dp.toPx(),
                 android.graphics.Paint().apply {
-                    color = if (label.contains("AKTIF")) android.graphics.Color.parseColor("#0284C7") else android.graphics.Color.parseColor("#64748B")
+                    color = if (index == timeLabels.lastIndex && orderedLogs.isNotEmpty()) android.graphics.Color.parseColor("#0284C7") else android.graphics.Color.parseColor("#64748B")
                     textSize = 8.sp.toPx()
-                    isFakeBoldText = label.contains("AKTIF")
+                    isFakeBoldText = (index == timeLabels.lastIndex && orderedLogs.isNotEmpty())
                     isAntiAlias = true
                 }
             )
@@ -810,40 +844,69 @@ fun TelemetryChartCanvasFull(
         fun getX(ratio: Float) = leftMargin + graphW * ratio
         fun getY(valRatio: Float) = graphH - (graphH * valRatio.coerceIn(0.02f, 0.98f))
 
-        val tdsRatio = (((currentTds ?: 0.0).toFloat()) / 500f).coerceIn(0.08f, 0.95f)
-        val tdsPath = Path().apply {
-            moveTo(getX(0f), getY(tdsRatio * 0.92f))
-            cubicTo(
-                getX(0.4f), getY(tdsRatio * 0.95f),
-                getX(0.7f), getY(tdsRatio * 0.88f),
-                getX(1f), getY(tdsRatio)
-            )
+        fun drawMetricSeries(values: List<Float>, color: Color, dashed: Boolean = false, fillArea: Boolean = false) {
+            if (values.isEmpty()) return
+            val path = Path()
+            if (values.size == 1) {
+                val y = getY(values.first())
+                path.moveTo(getX(0f), y)
+                path.lineTo(getX(1f), y)
+            } else {
+                values.forEachIndexed { idx, ratioVal ->
+                    val x = getX(idx.toFloat() / (values.size - 1))
+                    val y = getY(ratioVal)
+                    if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+            }
+            if (fillArea) {
+                val area = Path().apply {
+                    addPath(path)
+                    lineTo(getX(1f), graphH)
+                    lineTo(getX(0f), graphH)
+                    close()
+                }
+                drawPath(area, color = color.copy(alpha = 0.14f))
+            }
+            val style = if (dashed) {
+                Stroke(width = 1.8.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f))
+            } else {
+                Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            }
+            drawPath(path, color = color, style = style)
+            drawCircle(color = color, radius = 3.8.dp.toPx(), center = Offset(getX(1f), getY(values.last())))
         }
-        val tdsArea = Path().apply {
-            addPath(tdsPath)
-            lineTo(getX(1f), graphH)
-            lineTo(getX(0f), graphH)
-            close()
-        }
-        drawPath(tdsArea, color = Color(0x222563EB))
-        drawPath(tdsPath, color = Color(0xFF1D4ED8), style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round))
-        drawCircle(color = Color(0xFF1D4ED8), radius = 4.dp.toPx(), center = Offset(getX(1f), getY(tdsRatio)))
 
-        val turbRatio = (((currentTurbidity ?: 0.0).toFloat()) / 4000f).coerceIn(0.05f, 0.92f)
-        val turbPath = Path().apply {
-            moveTo(getX(0f), getY(turbRatio))
-            lineTo(getX(1f), getY(turbRatio))
+        val tdsSeries = if (orderedLogs.isNotEmpty()) {
+            orderedLogs.map { (((it.tds ?: currentTds).toFloat()) / 500f).coerceIn(0.04f, 0.95f) }
+        } else {
+            listOf((((currentTds).toFloat()) / 500f).coerceIn(0.04f, 0.95f))
         }
-        drawPath(turbPath, color = Color(0xFFDC2626), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
-        drawCircle(color = Color(0xFFDC2626), radius = 3.5.dp.toPx(), center = Offset(getX(1f), getY(turbRatio)))
+        val phSeries = if (orderedLogs.isNotEmpty()) {
+            orderedLogs.map { ((((it.ph ?: currentPh).toFloat()) * 10f) / 500f).coerceIn(0.04f, 0.90f) }
+        } else {
+            listOf(((((currentPh).toFloat()) * 10f) / 500f).coerceIn(0.04f, 0.90f))
+        }
+        val turbSeries = if (orderedLogs.isNotEmpty()) {
+            orderedLogs.map { (((it.turbidity ?: currentTurbidity).toFloat()) / 500f).coerceIn(0.03f, 0.95f) }
+        } else {
+            listOf((((currentTurbidity).toFloat()) / 500f).coerceIn(0.03f, 0.95f))
+        }
+        val tempSeries = if (orderedLogs.isNotEmpty()) {
+            orderedLogs.map { (((it.temperature ?: currentTemp).toFloat() * 5f) / 500f).coerceIn(0.03f, 0.90f) }
+        } else {
+            listOf((((currentTemp).toFloat() * 5f) / 500f).coerceIn(0.03f, 0.90f))
+        }
+        val doSeries = if (orderedLogs.isNotEmpty()) {
+            orderedLogs.map { (((it.doLevel ?: currentDo).toFloat() * 10f) / 500f).coerceIn(0.03f, 0.90f) }
+        } else {
+            listOf((((currentDo).toFloat() * 10f) / 500f).coerceIn(0.03f, 0.90f))
+        }
 
-        val phRatio = ((((currentPh ?: 0.0).toFloat()) * 10f) / 500f).coerceIn(0.04f, 0.85f)
-        val phPath = Path().apply {
-            moveTo(getX(0f), getY(phRatio * 0.98f))
-            lineTo(getX(1f), getY(phRatio))
-        }
-        drawPath(phPath, color = Color(0xFF047857), style = Stroke(width = 1.8.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)))
-        drawCircle(color = Color(0xFF047857), radius = 3.dp.toPx(), center = Offset(getX(1f), getY(phRatio)))
+        drawMetricSeries(tdsSeries, Color(0xFF1D4ED8), fillArea = true)
+        drawMetricSeries(turbSeries, Color(0xFFDC2626))
+        drawMetricSeries(tempSeries, Color(0xFF06B6D4))
+        drawMetricSeries(doSeries, Color(0xFFEAB308))
+        drawMetricSeries(phSeries, Color(0xFF047857), dashed = true)
     }
 }
 

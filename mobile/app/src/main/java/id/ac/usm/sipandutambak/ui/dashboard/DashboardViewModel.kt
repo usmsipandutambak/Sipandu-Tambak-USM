@@ -1,4 +1,4 @@
-﻿package id.ac.usm.sipandutambak.ui.dashboard
+package id.ac.usm.sipandutambak.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -7,6 +7,7 @@ import id.ac.usm.sipandutambak.domain.model.Alert
 import id.ac.usm.sipandutambak.domain.model.Device
 import id.ac.usm.sipandutambak.domain.model.PondSummary
 import id.ac.usm.sipandutambak.domain.repository.TambakRepository
+import id.ac.usm.sipandutambak.util.WibTimeUtil
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,9 +15,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 data class DashboardUiState(
     val isLoading: Boolean = false,
@@ -57,7 +55,7 @@ class DashboardViewModel(
             val devicesResult = repository.getDevices()
 
             val isOffline = summaryResult.isFailure && devicesResult.isSuccess
-            val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val currentTime = WibTimeUtil.formatNowWib("HH:mm:ss")
 
             if (devicesResult.isSuccess || summaryResult.isSuccess) {
                 _uiState.value = _uiState.value.copy(

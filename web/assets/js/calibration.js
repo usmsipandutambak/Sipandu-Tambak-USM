@@ -83,6 +83,22 @@ function validateAndGetValues(def) {
   return { slope: sRes.val, offset: oRes.val };
 }
 
+async function _postCalibrationWithRetry(payload, maxAttempts = 3, delayMs = 1000) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await ESP32API.postCalibration(payload);
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[Calibration] Percobaan ${attempt}/${maxAttempts} ke ESP32 gagal:`, err.message);
+      if (attempt < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastErr || new Error('Gagal mengirim kalibrasi ke ESP32');
+}
+
 async function _syncCalib(def, btn, actionLabel) {
   const values = validateAndGetValues(def);
   if (!values) { Utils.toast('Validasi gagal — periksa input', 'error'); return; }
@@ -102,7 +118,7 @@ async function _syncCalib(def, btn, actionLabel) {
   }
 
   try {
-    await ESP32API.postCalibration({ [def.apiKey]: values });
+    await _postCalibrationWithRetry({ [def.apiKey]: values }, 3, 1000);
     esp32Ok = true;
   } catch (err) {
     espError = err.message;

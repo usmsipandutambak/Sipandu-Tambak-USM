@@ -145,13 +145,13 @@ private suspend fun checkJetsonConnection(streamUrl: String): JetsonServerStatus
     try {
         conn = (URL(target).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 2500
-            readTimeout = 2500
+            connectTimeout = 6000
+            readTimeout = 6000
             instanceFollowRedirects = true
         }
         code = conn.responseCode
     } catch (e: Exception) {
-        errorMsg = e.localizedMessage ?: "Timeout / tidak terjangkau"
+        errorMsg = e.localizedMessage ?: "Timeout / sinyal lemah"
     } finally {
         try {
             conn?.disconnect()
@@ -170,8 +170,8 @@ private suspend fun checkJetsonConnection(streamUrl: String): JetsonServerStatus
             try {
                 statusConn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 1500
-                    readTimeout = 1500
+                    connectTimeout = 3000
+                    readTimeout = 3000
                 }
                 if (statusConn.responseCode in 200..299) {
                     val body = statusConn.inputStream.bufferedReader().use { it.readText() }
@@ -223,7 +223,42 @@ private fun escapeHtmlAttribute(value: String): String = value
 private fun buildMjpegStreamHtml(streamUrl: String, useCoverScale: Boolean): String {
     val safeUrl = escapeHtmlAttribute(streamUrl.trim())
     val objectFit = if (useCoverScale) "cover" else "contain"
-    return "<html><body style='margin:0;padding:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;'><img src='$safeUrl' style='width:100%;height:100%;object-fit:$objectFit;'/></body></html>"
+    return """
+        <html>
+        <body style='margin:0;padding:0;background:#0F172A;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;font-family:sans-serif;color:#E2E8F0;position:relative;'>
+          <div id='status' style='position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:16px;background:#0F172A;z-index:2;'>
+            <div id='msg' style='font-size:13px;font-weight:600;color:#CBD5E1;'>Menghubungkan stream kamera Jetson...</div>
+            <button id='retry' onclick='reloadStream()' style='display:none;margin-top:10px;padding:6px 14px;border:none;border-radius:8px;background:#2563EB;color:#fff;font-size:12px;font-weight:700;'>Muat Ulang Stream</button>
+          </div>
+          <img id='cam' src='$safeUrl' style='width:100%;height:100%;object-fit:$objectFit;display:block;' />
+          <script>
+            var loaded = false;
+            var img = document.getElementById('cam');
+            var st = document.getElementById('status');
+            var msg = document.getElementById('msg');
+            var btn = document.getElementById('retry');
+            function showErr(txt) {
+              if (loaded) return;
+              st.style.display = 'flex';
+              msg.innerText = txt;
+              msg.style.color = '#FBBF24';
+              btn.style.display = 'inline-block';
+            }
+            function reloadStream() {
+              loaded = false;
+              msg.innerText = 'Menghubungkan ulang stream...';
+              msg.style.color = '#CBD5E1';
+              btn.style.display = 'none';
+              var sep = '$safeUrl'.indexOf('?') >= 0 ? '&' : '?';
+              img.src = '$safeUrl' + sep + 'cb=' + Date.now();
+            }
+            img.onload = function() { loaded = true; st.style.display = 'none'; };
+            img.onerror = function() { loaded = false; showErr('Sinyal lemah / stream Jetson tidak terjangkau'); };
+            setTimeout(function() { if (!loaded) showErr('Koneksi stream lambat (timeout). Pastikan Jetson & Wi-Fi aktif.'); }, 10000);
+          </script>
+        </body>
+        </html>
+    """.trimIndent()
 }
 
 enum class CameraState {
@@ -269,11 +304,16 @@ fun CameraMonitoringScreen(
         )
     }
     var jetsonStreamUrl by remember {
-        mutableStateOf(
-            cameraPrefs.getString(KEY_STREAM_URL, DEFAULT_STREAM_URL)
-                ?.takeIf { it.isNotBlank() }
-                ?: DEFAULT_STREAM_URL
-        )
+        val rawSaved = cameraPrefs.getString(KEY_STREAM_URL, DEFAULT_STREAM_URL)?.trim().orEmpty()
+        val migrated = if (rawSaved.isBlank() || rawSaved == "http://10.146.87.247:5000/video_feed") {
+            if (rawSaved == "http://10.146.87.247:5000/video_feed") {
+                cameraPrefs.edit().putString(KEY_STREAM_URL, DEFAULT_STREAM_URL).apply()
+            }
+            DEFAULT_STREAM_URL
+        } else {
+            rawSaved
+        }
+        mutableStateOf(migrated)
     }
     var selectedResolution by remember {
         mutableStateOf(
@@ -503,14 +543,30 @@ fun CameraMonitoringScreen(
                                             ViewGroup.LayoutParams.MATCH_PARENT,
                                             ViewGroup.LayoutParams.MATCH_PARENT
                                         )
-                                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                        setBackgroundColor(android.graphics.Color.parseColor("#0F172A"))
                                         settings.javaScriptEnabled = true
                                         settings.loadWithOverviewMode = true
                                         settings.useWideViewPort = true
                                         settings.domStorageEnabled = true
                                         settings.cacheMode = WebSettings.LOAD_NO_CACHE
                                         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                        webViewClient = WebViewClient()
+                                        webViewClient = object : WebViewClient() {
+                                            override fun onReceivedError(
+                                                view: WebView?,
+                                                request: android.webkit.WebResourceRequest?,
+                                                error: android.webkit.WebResourceError?
+                                            ) {
+                                                if (request?.isForMainFrame == false) return
+                                                val desc = error?.description?.toString() ?: "Koneksi terputus"
+                                                view?.loadDataWithBaseURL(
+                                                    null,
+                                                    "<html><body style='margin:0;background:#0F172A;color:#FBBF24;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;text-align:center;padding:16px;'><div style='font-size:13px;font-weight:700;'>Sinyal lemah / gagal memuat kamera</div><div style='font-size:11px;color:#94A3B8;margin-top:4px;'>" + desc + "</div></body></html>",
+                                                    "text/html",
+                                                    "UTF-8",
+                                                    null
+                                                )
+                                            }
+                                        }
                                         webChromeClient = WebChromeClient()
                                         tag = streamSignature
                                         loadDataWithBaseURL(

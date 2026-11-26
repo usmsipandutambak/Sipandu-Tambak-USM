@@ -50,12 +50,11 @@ import id.ac.usm.sipandutambak.ui.util.AlertLevel
 import id.ac.usm.sipandutambak.ui.util.ParamAlert
 import id.ac.usm.sipandutambak.ui.util.WaterQualityRules
 import id.ac.usm.sipandutambak.util.CsvExportHelper
+import id.ac.usm.sipandutambak.util.WibTimeUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 enum class MapPondStatus {
@@ -76,6 +75,8 @@ data class LivePond(
     val temp: Double?,
     val turbidity: Double?,
     val doLevel: Double?,
+    val batteryVoltage: Double? = null,
+    val batteryCurrentA: Double? = null,
     val nh4: Double?,
     val no3: Double?,
     val cod: Double?,
@@ -101,19 +102,8 @@ data class LivePond(
 fun fmtLive(v: Double?, decimals: Int = 1): String =
     formatSensorMetric(v, decimals, "N/A")
 
-private fun formatIsoToTime(rawDate: String): String {
-    if (rawDate.length < 19) return "-"
-    return try {
-        val inFmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-            timeZone = java.util.TimeZone.getTimeZone("UTC")
-        }
-        val outFmt = SimpleDateFormat("HH:mm:ss", Locale("id", "ID"))
-        val parsed = inFmt.parse(rawDate.substring(0, 19))
-        if (parsed != null) outFmt.format(parsed) else "-"
-    } catch (_: Exception) {
-        "-"
-    }
-}
+private fun formatIsoToTime(rawDate: String): String =
+    WibTimeUtil.formatIsoToWibTime(rawDate, "HH:mm:ss")
 
 suspend fun fetchLivePonds(): List<LivePond> {
     val devicesArr = SupabaseApi.getDevices()
@@ -123,7 +113,7 @@ suspend fun fetchLivePonds(): List<LivePond> {
     val latestByPond = mutableMapOf<Int, JSONObject>()
     for (i in 0 until logsArr.length()) {
         val logObj = logsArr.getJSONObject(i)
-        val devKey = logObj.optString("device_id", "").trim().uppercase(Locale.ROOT)
+        val devKey = logObj.optNullableStringAny("device_id")?.uppercase(Locale.ROOT) ?: ""
         if (devKey.isNotEmpty() && !latestByDevice.containsKey(devKey)) {
             latestByDevice[devKey] = logObj
         }
@@ -136,9 +126,9 @@ suspend fun fetchLivePonds(): List<LivePond> {
     val out = mutableListOf<LivePond>()
     for (i in 0 until devicesArr.length()) {
         val o = devicesArr.getJSONObject(i)
-        val devId = o.optString("id", "")
+        val devId = o.optNullableStringAny("id") ?: continue
         val pondNum = o.optInt("pond_number", 1)
-        val matchedLog = latestByDevice[devId.trim().uppercase(Locale.ROOT)] ?: latestByPond[pondNum]
+        val matchedLog = latestByDevice[devId.uppercase(Locale.ROOT)] ?: latestByPond[pondNum]
 
         val ph = matchedLog?.optNullableDoubleAny("ph_level", "ph", "live_ph")
             ?: o.optNullableDoubleAny("live_ph", "ph_level")
@@ -150,6 +140,8 @@ suspend fun fetchLivePonds(): List<LivePond> {
             ?: o.optNullableDoubleAny("live_turb", "turbidity_ntu")
         val doLevel = matchedLog?.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do")
             ?: o.optNullableDoubleAny("live_do", "do_level", "dissolved_oxygen")
+        val batVoltage = matchedLog?.optNullableDoubleAny("battery_voltage", "bat_v")
+        val batCurrent = matchedLog?.optNullableDoubleAny("battery_current_a", "bat_i")
         val nh4 = matchedLog?.optNullableDoubleAny("nh4", "nh4_mg_l", "amonia")
         val no3 = matchedLog?.optNullableDoubleAny("no3", "no3_mg_l", "nitrat")
         val cod = matchedLog?.optNullableDoubleAny("cod", "cod_mg_l")
@@ -164,20 +156,29 @@ suspend fun fetchLivePonds(): List<LivePond> {
             ?: matchedLog?.optNullableStringAny("cod")
             ?: "N/A"
 
-        val alerts = WaterQualityRules.evaluateAll(ph, tds, temp, doLevel)
-        val lastUpdated = formatIsoToTime(matchedLog?.optString("created_at", "") ?: "")
+        val alerts = WaterQualityRules.evaluateAll(ph, tds, temp, doLevel, turbidity)
+        val createdAtRaw = matchedLog?.optNullableStringAny("created_at")
+        val lastSeenRaw = o.optNullableStringAny("last_seen")
+        val lastUpdated = formatIsoToTime(createdAtRaw ?: lastSeenRaw ?: "")
+        val isOnlineWib = WibTimeUtil.isDeviceOnline(
+            createdAt = createdAtRaw,
+            lastSeen = lastSeenRaw,
+            fallbackFlag = o.optBoolean("is_connected", false)
+        )
 
         out.add(
             LivePond(
                 deviceId = devId,
-                deviceName = o.optString("name", "Sipandu"),
+                deviceName = o.optNullableStringAny("name") ?: "Sipandu",
                 pondNumber = pondNum,
-                isConnected = o.optBoolean("is_connected", false) || matchedLog != null,
+                isConnected = isOnlineWib,
                 ph = ph,
                 tds = tds,
                 temp = temp,
                 turbidity = turbidity,
                 doLevel = doLevel,
+                batteryVoltage = batVoltage,
+                batteryCurrentA = batCurrent,
                 nh4 = nh4,
                 no3 = no3,
                 cod = cod,
@@ -198,29 +199,34 @@ suspend fun fetchLivePonds(): List<LivePond> {
         val temp = logObj.optNullableDoubleAny("temperature_c", "temperature", "temp", "live_temp")
         val turbidity = logObj.optNullableDoubleAny("turbidity_ntu", "turbidity", "turb", "live_turb")
         val doLevel = logObj.optNullableDoubleAny("do_level", "do_mg_l", "dissolved_oxygen", "do", "live_do")
+        val batVoltage = logObj.optNullableDoubleAny("battery_voltage", "bat_v")
+        val batCurrent = logObj.optNullableDoubleAny("battery_current_a", "bat_i")
         val nh4 = logObj.optNullableDoubleAny("nh4", "nh4_mg_l", "amonia")
         val no3 = logObj.optNullableDoubleAny("no3", "no3_mg_l", "nitrat")
         val cod = logObj.optNullableDoubleAny("cod", "cod_mg_l")
-        val alerts = WaterQualityRules.evaluateAll(ph, tds, temp, doLevel)
+        val alerts = WaterQualityRules.evaluateAll(ph, tds, temp, doLevel, turbidity)
+        val createdAtRaw = logObj.optNullableStringAny("created_at")
 
         out.add(
             LivePond(
-                deviceId = logObj.optString("device_id", "SIPANDU_A"),
+                deviceId = logObj.optNullableStringAny("device_id") ?: "SIPANDU_A",
                 deviceName = "Sipandu A",
                 pondNumber = logObj.optInt("pond_number", 5),
-                isConnected = true,
+                isConnected = WibTimeUtil.isDeviceOnline(createdAtRaw, null, fallbackFlag = true),
                 ph = ph,
                 tds = tds,
                 temp = temp,
                 turbidity = turbidity,
                 doLevel = doLevel,
+                batteryVoltage = batVoltage,
+                batteryCurrentA = batCurrent,
                 nh4 = nh4,
                 no3 = no3,
                 cod = cod,
                 nh4Label = nh4?.let { formatSensorMetric(it, 2) } ?: "N/A",
                 no3Label = no3?.let { formatSensorMetric(it, 2) } ?: "N/A",
                 codLabel = cod?.let { formatSensorMetric(it, 1) } ?: "N/A",
-                lastUpdatedLabel = formatIsoToTime(logObj.optString("created_at", "")),
+                lastUpdatedLabel = formatIsoToTime(createdAtRaw ?: ""),
                 alerts = alerts,
                 level = if (alerts.isEmpty()) null else WaterQualityRules.overallStatus(alerts)
             )
@@ -246,31 +252,40 @@ fun DashboardScreen(
     val deviceListState by deviceListViewModel.uiState.collectAsState()
     val devices = deviceListState.devices
 
-    val currentDate = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale("id", "ID")).format(Date())
+    val currentDate = WibTimeUtil.formatNowWib("EEEE, dd MMMM yyyy")
     var showSidebar by remember { mutableStateOf(false) }
 
     val anomalyScrollState = rememberScrollState()
 
     // Data sensor realtime dari Supabase (polling 5 detik)
     var livePonds by remember { mutableStateOf<List<LivePond>>(emptyList()) }
+    var networkErrorMsg by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         while (true) {
             try {
-                livePonds = withContext(Dispatchers.IO) { fetchLivePonds() }
+                val fetched = withContext(Dispatchers.IO) { fetchLivePonds() }
+                if (fetched.isNotEmpty() || SupabaseApi.lastNetworkError == null) {
+                    livePonds = fetched
+                }
+                networkErrorMsg = SupabaseApi.lastNetworkError
             } catch (e: Exception) {
                 e.printStackTrace()
+                networkErrorMsg = SupabaseApi.lastNetworkError ?: "Sinyal internet lemah — mencoba sinkronisasi ulang"
             }
             delay(5_000)
         }
     }
 
-    // Status kolam dihitung dari nilai sensor (bukan dari kolom status)
+    // Status kekeruhan kolam: 0.0 - 25.0 NTU = JERNIH, > 25.0 NTU = KERUH (angka 0 valid)
     fun getPondStatus(num: Int): MapPondStatus {
-        val p = livePonds.firstOrNull { it.pondNumber == num && it.isConnected }
-        return when (p?.level) {
-            null -> MapPondStatus.STANDBY
-            AlertLevel.NORMAL -> MapPondStatus.JERNIH
-            else -> MapPondStatus.KERUH
+        val p = livePonds.firstOrNull { it.pondNumber == num && it.isConnected } ?: return MapPondStatus.STANDBY
+        val turb = p.turbidity
+        return when {
+            turb != null && !turb.isNaN() && turb > 25.0 -> MapPondStatus.KERUH
+            turb != null && !turb.isNaN() && turb >= 0.0 -> MapPondStatus.JERNIH
+            p.level == AlertLevel.NORMAL -> MapPondStatus.JERNIH
+            p.level != null -> MapPondStatus.KERUH
+            else -> MapPondStatus.STANDBY
         }
     }
 
@@ -420,17 +435,25 @@ fun DashboardScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F172A)
                             )
-                            val subtitle = if (primaryLive != null) {
-                                "${primaryLive.deviceName.replace("Sipandu", "ALAT").uppercase()} - ${primaryLive.pondName.uppercase()} • Log ${primaryLive.lastUpdatedLabel}"
-                            } else {
-                                "Menunggu pembacaan dari Supabase sensor_logs..."
+                            val subtitle = when {
+                                primaryLive != null -> "${primaryLive.deviceName.replace("Sipandu", "ALAT").uppercase()} - ${primaryLive.pondName.uppercase()} • Log ${primaryLive.lastUpdatedLabel} WIB"
+                                networkErrorMsg != null -> networkErrorMsg!!
+                                else -> "Menunggu pembacaan dari Supabase sensor_logs..."
                             }
                             Text(
                                 text = subtitle,
                                 fontSize = 10.5.sp,
-                                color = Color(0xFF64748B),
+                                color = if (networkErrorMsg != null && primaryLive == null) Color(0xFFD97706) else Color(0xFF64748B),
                                 fontWeight = FontWeight.Medium
                             )
+                            if (networkErrorMsg != null && primaryLive != null) {
+                                Text(
+                                    text = "Sinyal lemah ($networkErrorMsg) — menampilkan data terakhir",
+                                    fontSize = 9.5.sp,
+                                    color = Color(0xFFD97706),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     }
 
@@ -626,26 +649,40 @@ fun DashboardScreen(
                             }
 
                             if (totalAirKualitas > 0) {
-                                Column(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(top = 34.dp, end = 26.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("Jernih", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    Text(jernihCount.toString() + " kolam", color = Color.White, fontSize = 10.sp)
-                                    Text(jernihPercent.toString() + "%", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
+                                if (jernihCount > 0 && keruhCount > 0) {
+                                    Column(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(top = 34.dp, end = 26.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text("Jernih", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("$jernihCount kolam", color = Color.White, fontSize = 10.sp)
+                                        Text("$jernihPercent%", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
 
-                                Column(
-                                    modifier = Modifier
-                                        .align(Alignment.Center)
-                                        .padding(top = 18.dp, end = 16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("Keruh", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    Text(keruhCount.toString() + " kolam", color = Color.White, fontSize = 11.sp)
-                                    Text(keruhPercent.toString() + "%", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Column(
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .padding(top = 18.dp, end = 16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text("Keruh", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text("$keruhCount kolam", color = Color.White, fontSize = 11.sp)
+                                        Text("$keruhPercent%", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else if (jernihCount > 0) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Jernih", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        Text("$jernihCount kolam", color = Color.White, fontSize = 11.sp)
+                                        Text("$jernihPercent%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Keruh", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        Text("$keruhCount kolam", color = Color.White, fontSize = 11.sp)
+                                        Text("$keruhPercent%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             } else {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

@@ -238,7 +238,19 @@ fun TelemetryLogSection(
                     }
                 } else {
                     for (log in logs) {
-                        val isDanger = log.status.equals("BAHAYA", true)
+                        val statusUpper = log.status.uppercase()
+                        val isDanger = statusUpper == "BAHAYA" || statusUpper == "KRITIS"
+                        val isWarn = statusUpper == "WASPADA" || statusUpper == "PERINGATAN"
+                        val badgeBgColor = when {
+                            isDanger -> Color(0xFFFECDD3)
+                            isWarn -> Color(0xFFFEF08A)
+                            else -> Color(0xFF86EFAC)
+                        }
+                        val badgeTextColor = when {
+                            isDanger -> Color(0xFF991B1B)
+                            isWarn -> Color(0xFF92400E)
+                            else -> Color(0xFF065F46)
+                        }
                         Row(
                             modifier = Modifier
                                 .width(740.dp)
@@ -264,15 +276,15 @@ fun TelemetryLogSection(
                             Box(modifier = Modifier.width(80.dp), contentAlignment = Alignment.Center) {
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (isDanger) Color(0xFFFECDD3) else Color(0xFF86EFAC),
+                                    color = badgeBgColor,
                                     modifier = Modifier.height(18.dp)
                                 ) {
                                     Box(modifier = Modifier.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
                                         Text(
-                                            text = log.status.uppercase(),
+                                            text = statusUpper,
                                             fontSize = 7.5.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isDanger) Color(0xFF991B1B) else Color(0xFF065F46)
+                                            color = badgeTextColor
                                         )
                                     }
                                 }

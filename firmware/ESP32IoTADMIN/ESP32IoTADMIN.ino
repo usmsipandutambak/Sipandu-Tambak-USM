@@ -140,8 +140,8 @@ const float minVolt = 11.0f;
 const float maxVolt = 14.1f;
 const float offsetINA = -0.50f;
 
-float phSlope = -5.70f;
-float phOffset = 21.34f;
+float phSlope = -11.43f;
+float phOffset = 52.00f;
 float doSlope = 5.5f;
 float doOffset = 0.0f;
 float tdsSlope = 500.0f;
@@ -187,6 +187,8 @@ void setup() {
     delay(2000);
 
     showOLEDMessage("Connecting WiFi...");
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
     connectWiFi();
     bool wifiOK = (WiFi.status() == WL_CONNECTED);
     String ipStr = wifiOK ? WiFi.localIP().toString() : "";
@@ -214,6 +216,13 @@ void setup() {
 
 void loop() {
   if (OPERATION_MODE == MODE_CONTINUOUS) {
+    static unsigned long lastWifiRetryMs = 0;
+    if (WiFi.status() != WL_CONNECTED &&
+        (millis() - lastWifiRetryMs >= 15000UL)) {
+      lastWifiRetryMs = millis();
+      Serial.println(F("[WiFi] Sinyal terputus - mencoba reconnect..."));
+      WiFi.reconnect();
+    }
     handleHTTPServer();
     handleSerialCommands();
     handleMQTT();

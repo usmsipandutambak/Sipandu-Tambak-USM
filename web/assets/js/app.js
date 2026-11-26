@@ -23,7 +23,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const ipInput    = document.getElementById('esp32-ip-input');
   const ipSaveBtn  = document.getElementById('esp32-ip-save');
   const headerIpEl = document.getElementById('header-ip');
-  const savedIP    = (localStorage.getItem('esp32_ip') || sessionStorage.getItem('esp32_ip') || '192.168.100.213').trim();
+  let rawSavedIP   = (localStorage.getItem('esp32_ip') || sessionStorage.getItem('esp32_ip') || '192.168.100.213').trim();
+  if (rawSavedIP === '10.146.87.127') {
+    rawSavedIP = '192.168.100.213';
+    localStorage.setItem('esp32_ip', rawSavedIP);
+    sessionStorage.setItem('esp32_ip', rawSavedIP);
+  }
+  const savedIP    = rawSavedIP;
 
   if (savedIP) {
     const cleanIP = savedIP.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
@@ -48,7 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Jetson Nano IP Configuration (camera stream) ─────────────────────────
   const jetsonInput    = document.getElementById('jetson-ip-input');
   const jetsonSaveBtn  = document.getElementById('jetson-ip-save');
-  const savedJetson    = localStorage.getItem('jetson_host') || sessionStorage.getItem('jetson_host') || '192.168.100.41';
+  let rawSavedJetson   = (localStorage.getItem('jetson_host') || sessionStorage.getItem('jetson_host') || '192.168.100.41').trim();
+  if (rawSavedJetson === '10.146.87.247' || rawSavedJetson === 'http://10.146.87.247:5000/video_feed') {
+    rawSavedJetson = '192.168.100.41';
+    localStorage.setItem('jetson_host', rawSavedJetson);
+    sessionStorage.setItem('jetson_host', rawSavedJetson);
+  }
+  const savedJetson    = rawSavedJetson;
 
   if (savedJetson) {
     JetsonAPI.setHost(savedJetson);
